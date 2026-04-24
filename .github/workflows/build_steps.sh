@@ -62,6 +62,12 @@ setup_emsdk() {
     git clone https://github.com/emscripten-core/emsdk.git
     ./emsdk/emsdk install 4.0.10
     ./emsdk/emsdk activate 4.0.10
+    # Force installing emscripten's typescript dependencies. This is a
+    # workaround for the github update to a newer typescript, which gives an
+    # error on the deprecated `--outFile` flag.
+    pushd emsdk/upstream/emscripten
+    npm i
+    popd
 }
 
 
@@ -145,9 +151,8 @@ build_simulate() {
 }
 
 
-_configure_studio() {
-    # Invoke cmake will all options OFF assuming that the caller will enable
-    # needed options by running `export _CONFIGURE_STUDIO_CMAKE_ARGS=...` first
+configure_studio() {
+    echo "Configuring Studio..."
     cmake -B build \
         -DCMAKE_BUILD_TYPE:STRING=Release \
         -DCMAKE_INTERPROCEDURAL_OPTIMIZATION:BOOL=OFF \
@@ -155,28 +160,12 @@ _configure_studio() {
         -DBUILD_SHARED_LIBS=OFF \
         -DMUJOCO_BUILD_EXAMPLES=OFF \
         -DMUJOCO_BUILD_SIMULATE=OFF \
-        -DMUJOCO_BUILD_STUDIO=OFF \
+        -DMUJOCO_BUILD_STUDIO=ON \
         -DMUJOCO_BUILD_TESTS=OFF \
         -DMUJOCO_TEST_PYTHON_UTIL=OFF \
         -DMUJOCO_WITH_USD=OFF \
-        -DMUJOCO_USE_FILAMENT=OFF \
-        -DMUJOCO_USE_FILAMENT_VULKAN=OFF \
-        ${_CONFIGURE_STUDIO_CMAKE_ARGS}
-}
-
-
-configure_studio_legacy_opengl() {
-    echo "Configuring Studio (legacy OpenGL)..."
-    export _CONFIGURE_STUDIO_CMAKE_ARGS="-DMUJOCO_BUILD_STUDIO=ON ${CMAKE_ARGS}"
-    _configure_studio
-    echo "Configuring Studio (legacy OpenGL)... DONE"
-}
-
-
-configure_studio() {
-    echo "Configuring Studio..."
-    export _CONFIGURE_STUDIO_CMAKE_ARGS="-DMUJOCO_BUILD_STUDIO=ON -DMUJOCO_USE_FILAMENT=ON ${CMAKE_ARGS}"
-    _configure_studio
+        -DMUJOCO_USE_FILAMENT=ON \
+        ${CMAKE_ARGS}
     echo "Configuring Studio... DONE"
 }
 
@@ -223,11 +212,39 @@ build_test_wasm() {
     echo "Building and testing WASM bindings..."
     source emsdk/emsdk_env.sh
     export PATH="$(pwd)/node_modules/.bin:$PATH"
+    echo "Build MuJoCo with Emscripten (Multi-Threaded)..."
+    emcmake cmake -B build_wasm_mt \
+        -DCMAKE_INTERPROCEDURAL_OPTIMIZATION:BOOL=OFF \
+        -DMUJOCO_WASM_THREADS=ON \
+        $WASM_CMAKE_ARGS
+    cmake --build build_wasm_mt --parallel $(nproc)
 
-    emcmake cmake -B build_wasm -DCMAKE_INTERPROCEDURAL_OPTIMIZATION:BOOL=OFF $WASM_CMAKE_ARGS
-    cmake --build build_wasm
-
+    echo "Run bindings tests for Multi-Threaded version..."
     npm run test --prefix ./wasm
+
+    echo "Moving Multi-Thread version under mt subfolder..."
+    mkdir -p wasm/dist/mt
+    mv wasm/dist/mujoco.* wasm/dist/mt/
+
+    echo "Build MuJoCo with Emscripten (Single-Threaded)..."
+    emcmake cmake -B build_wasm_st \
+        -DCMAKE_INTERPROCEDURAL_OPTIMIZATION:BOOL=OFF \
+        -DMUJOCO_WASM_THREADS=OFF \
+        $WASM_CMAKE_ARGS
+    cmake --build build_wasm_st --parallel $(nproc)
+
+    echo "Run bindings tests for Single-Threaded version..."
+    npm run test --prefix ./wasm
+}
+
+package_wasm() {
+    echo "Publishing WASM bindings..."
+    cp wasm/package.npm.json wasm/dist/package.json
+    cp wasm/README.md wasm/dist/README.md
+    VERSION="${VERSION:-${GITHUB_REF#refs/tags/}}"
+    npm --prefix wasm/dist version "${VERSION}" --no-git-tag-version
+    npm pack --dry-run ./wasm/dist
+    npm publish ./wasm/dist --access public --provenance
 }
 
 
@@ -275,6 +292,32 @@ EOF
     -X POST \
     -H "Content-Type: application/json" \
     --data-raw "${CHATMSG}"
+}
+
+
+build_mujoco_live() {
+    echo "Setting up Emscripten SDK..."
+    source emsdk/emsdk_env.sh
+
+    echo "Building Filament tools, targeting host platform..."
+    cmake -S . -B build_host -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DUSE_STATIC_LIBCXX=OFF \
+        -DMUJOCO_BUILD_STUDIO=ON \
+        -DMUJOCO_USE_FILAMENT=ON \
+        -DMUJOCO_BUILD_TESTS=OFF \
+        -DMUJOCO_BUILD_EXAMPLES=OFF \
+        -DMUJOCO_BUILD_SIMULATE=OFF
+    cmake --build build_host --target matc resgen cmgen mujoco_filament_assets -j$(nproc)
+
+    echo "Building WASM app..."
+    emcmake cmake -S . -B build_wasm -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DMUJOCO_BUILD_STUDIO=ON \
+        -DMUJOCO_USE_FILAMENT=ON \
+        -DMUJOCO_BUILD_TESTS_WASM=OFF \
+        -DMUJOCO_NATIVE_BUILD_DIR=$(pwd)/build_host
+    cmake --build build_wasm --target mujoco_live -j$(nproc)
 }
 
 

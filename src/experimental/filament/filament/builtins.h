@@ -15,23 +15,24 @@
 #ifndef MUJOCO_SRC_EXPERIMENTAL_FILAMENT_FILAMENT_BUILTINS_H_
 #define MUJOCO_SRC_EXPERIMENTAL_FILAMENT_FILAMENT_BUILTINS_H_
 
+#include <memory>
+
 #include <filament/Engine.h>
-#include <mujoco/mjmodel.h>
-#include "experimental/filament/filament/buffer_util.h"
+#include "experimental/filament/filament/mesh.h"
 
 // Generates buffers for built-in shapes.
 namespace mujoco {
 
-FilamentBuffers CreateLine(filament::Engine* engine, const mjModel* model);
-FilamentBuffers CreateBox(filament::Engine* engine, const mjModel* model);
-FilamentBuffers CreateLineBox(filament::Engine* engine, const mjModel* model);
-FilamentBuffers CreateTriangle(filament::Engine* engine, const mjModel* model);
-FilamentBuffers CreatePlane(filament::Engine* engine, const mjModel* model);
-FilamentBuffers CreateSphere(filament::Engine* engine, const mjModel* model);
-FilamentBuffers CreateTube(filament::Engine* engine, const mjModel* model);
-FilamentBuffers CreateDisk(filament::Engine* engine, const mjModel* model);
-FilamentBuffers CreateDome(filament::Engine* engine, const mjModel* model);
-FilamentBuffers CreateCone(filament::Engine* engine, const mjModel* model);
+std::unique_ptr<Mesh> CreateLine(filament::Engine* engine);
+std::unique_ptr<Mesh> CreatePlane(filament::Engine* engine, int nquad);
+std::unique_ptr<Mesh> CreateTriangle(filament::Engine* engine);
+std::unique_ptr<Mesh> CreateBox(filament::Engine* engine, int nquad);
+std::unique_ptr<Mesh> CreateLineBox(filament::Engine* engine);
+std::unique_ptr<Mesh> CreateSphere(filament::Engine* engine, int nstack, int nslice);
+std::unique_ptr<Mesh> CreateTube(filament::Engine* engine, int nstack, int nslice);
+std::unique_ptr<Mesh> CreateDisk(filament::Engine* engine, int nslice);
+std::unique_ptr<Mesh> CreateDome(filament::Engine* engine, int nstack, int nslice);
+std::unique_ptr<Mesh> CreateCone(filament::Engine* engine, int nstack, int nslice);
 
 }  // namespace mujoco
 

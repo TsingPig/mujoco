@@ -15,9 +15,9 @@
 #include "user/user_model.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
-#include <array>
 #include <csetjmp>
 #include <cstdint>
 #include <cstdio>
@@ -32,16 +32,19 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include <mujoco/mjdata.h>
 #include <mujoco/mjmacro.h>
 #include <mujoco/mjmodel.h>
+#include <mujoco/mjplugin.h>
 #include <mujoco/mjspec.h>
 #include <mujoco/mjtnum.h>
-#include <mujoco/mjplugin.h>
+#include <mujoco/mujoco.h>
 #include "cc/array_safety.h"
+#include "engine/engine_core_util.h"
 #include "engine/engine_forward.h"
 #include "engine/engine_io.h"
 #include "engine/engine_name.h"
@@ -52,15 +55,13 @@
 #include "engine/engine_util_misc.h"
 #include "user/user_api.h"
 #include "user/user_objects.h"
+#include "user/user_threadpool.h"
 #include "user/user_util.h"
 
 namespace {
 namespace mju = ::mujoco::util;
 using std::string;
 using std::vector;
-constexpr int kMaxCompilerThreads = 16;
-
-
 
 //---------------------------------- LOCAL UTILITY FUNCTIONS ---------------------------------------
 
@@ -73,6 +74,18 @@ bool IsSameVec(const T pos1[3], const T pos2[3]) {
   return std::abs(pos1[0] - pos2[0]) < kFrameEps &&
          std::abs(pos1[1] - pos2[1]) < kFrameEps &&
          std::abs(pos1[2] - pos2[2]) < kFrameEps;
+}
+
+unsigned int NumCompilerThreads(int upper_bound = -1) {
+  // Use at most half the available threads to avoid
+  // overloading hyperthreaded CPUs.
+  // Compilation is largely compute-bound so we want to give each
+  // physical core a chance without too much L1/L2 cache thrashing.
+  unsigned int nthreads = std::thread::hardware_concurrency() / 2;
+  if (upper_bound > 0) {
+    nthreads = std::min(nthreads, static_cast<unsigned int>(upper_bound));
+  }
+  return std::max(static_cast<unsigned int>(1), nthreads);
 }
 
 // return true if two quaternions are element-wise less than kFrameEps apart, including double-cover
@@ -895,6 +908,7 @@ void mjCModel::ComputeSparseSizes() {
   // no dofs, quick return
   if (nv == 0) {
     nM = nD = nB = nC = 0;
+    nJten = 0;
     return;
   }
 
@@ -1072,6 +1086,37 @@ void mjCModel::ComputeSparseSizes() {
     }
   }
   nC = nOD + nv;
+
+  nJten = 0;
+  if (nv > 0) {
+    std::vector<bool> dof_bitmap(nv, false);
+    for (const auto* tendon : tendons_) {
+      if (!tendon->path.empty() &&
+          tendon->path[0]->Type() == mjWRAP_JOINT) {
+        nJten += tendon->path.size();
+        continue;
+      }
+
+      std::fill(dof_bitmap.begin(), dof_bitmap.end(), false);
+      for (const auto* wrap : tendon->path) {
+        int bodyid = GetBodyIdFromWrap(wrap);
+        if (bodyid > 0) {
+          mjCBody* b = bodies_[bodyid];
+          while (b && b->id > 0) {
+            for (const auto* jnt : b->joints) {
+              for (int k = 0; k < jnt->nv(); k++) {
+                dof_bitmap[jnt->dofadr_ + k] = true;
+              }
+            }
+            b = b->GetParent();
+          }
+        }
+      }
+      for (int j = 0; j < nv; j++) {
+        nJten += dof_bitmap[j];
+      }
+    }
+  }
 }
 
 
@@ -1149,10 +1194,13 @@ void mjCModel::Clear() {
   nflexedge = 0;
   nflexelem = 0;
   nflexelemdata = 0;
+  nflexstiffness = 0;
   nflexelemedge = 0;
   nflexshelldata = 0;
   nflexevpair = 0;
   nflextexcoord = 0;
+  nJfe = 0;
+  nJfv = 0;
   nmeshvert = 0;
   nmeshnormal = 0;
   nmeshtexcoord = 0;
@@ -2130,6 +2178,7 @@ void mjCModel::SetSizes() {
   }
   nbvh = nbvhstatic + nbvhdynamic;
 
+  int extra_stiffness_size = 0;
   // flex counts
   for (int i=0; i < nflex; i++) {
     nflexnode += flexes_[i]->nnode;
@@ -2141,7 +2190,66 @@ void mjCModel::SetSizes() {
     nflexshelldata += (int)flexes_[i]->shell.size();
     nflexevpair += (int)flexes_[i]->evpair.size()/2;
     nflextexcoord += (flexes_[i]->HasTexcoord() ? flexes_[i]->get_texcoord().size()/2 : 0);
+    if (flexes_[i]->spec.order != 0) {
+      int npc = (int)pow(flexes_[i]->spec.order + 1, 3);
+      int ndof_cell = 3 * npc;
+      int ncells = flexes_[i]->spec.cellcount[0] *
+                   flexes_[i]->spec.cellcount[1] *
+                   flexes_[i]->spec.cellcount[2];
+      extra_stiffness_size += ncells * ndof_cell * ndof_cell;
+    }
+    if (flexes_[i]->interpolated || flexes_[i]->rigid) {
+      continue;
+    }
+
+    // count number of non-zero elements in the edge Jacobian matrix
+    for (const auto& edge : flexes_[i]->edge) {
+      mjCBody* b1 = bodies_[flexes_[i]->vertbodyid[edge.first]];
+      mjCBody* b2 = bodies_[flexes_[i]->vertbodyid[edge.second]];
+      std::unordered_set<mjCBody*> bodies_in_jac;
+      while (b1 || b2) {
+        if (b1) {
+          bodies_in_jac.insert(b1);
+          b1 = b1->parent;
+        }
+        if (b2) {
+          bodies_in_jac.insert(b2);
+          b2 = b2->parent;
+        }
+      }
+      for (mjCBody* b : bodies_in_jac) {
+        nJfe += b->dofnum;
+      }
+    }
+
+    // compute nJfv
+    std::vector<std::vector<int>> adj(flexes_[i]->nvert);
+    for (const auto& edge : flexes_[i]->edge) {
+      adj[edge.first].push_back(edge.second);
+      adj[edge.second].push_back(edge.first);
+    }
+    for (int j=0; j < flexes_[i]->nvert; j++) {
+      std::unordered_set<int> vert_bodies;
+      vert_bodies.insert(flexes_[i]->vertbodyid[j]);
+      for (int neighbor : adj[j]) {
+        vert_bodies.insert(flexes_[i]->vertbodyid[neighbor]);
+      }
+      std::unordered_set<mjCBody*> bodies_in_jac;
+      for (int body_id : vert_bodies) {
+        mjCBody* b = bodies_[body_id];
+        while (b) {
+          bodies_in_jac.insert(b);
+          b = b->parent;
+        }
+      }
+      for (mjCBody* b : bodies_in_jac) {
+        nJfv += b->dofnum;
+      }
+    }
   }
+  // TODO: This can be compacted further when we update mjwarp to not rely on
+  // 21*elem_adr for non-interpolated flexes.
+  nflexstiffness = nflexelem * 21 + extra_stiffness_size;
 
   // mesh counts
   for (int i=0; i < nmesh; i++) {
@@ -2167,28 +2275,59 @@ void mjCModel::SetSizes() {
   }
 
   // nhfielddata
-  for (int i=0; i < nhfield; i++)nhfielddata += hfields_[i]->nrow * hfields_[i]->ncol;
+  for (int i=0; i < nhfield; i++) {
+    nhfielddata += static_cast<mjtSize>(hfields_[i]->nrow) * hfields_[i]->ncol;
+  }
 
   // ntexdata
-  for (int i=0; i < ntex; i++)ntexdata += textures_[i]->nchannel * textures_[i]->width * textures_[i]->height;
+  for (int i=0; i < ntex; i++) {
+    const mjCTexture* tex = textures_[i];
+    ntexdata += static_cast<mjtSize>(tex->nchannel) * tex->width * tex->height;
+  }
 
   // nwrap
-  for (int i=0; i < ntendon; i++)nwrap += (int)tendons_[i]->path.size();
+  for (int i=0; i < ntendon; i++) {
+    nwrap += static_cast<mjtSize>(tendons_[i]->path.size());
+  }
 
   // nsensordata
-  for (int i=0; i < nsensor; i++)nsensordata += sensors_[i]->dim;
+  for (int i=0; i < nsensor; i++) {
+    nsensordata += sensors_[i]->dim;
+  }
+
+  // nhistory: layout is [user, cursor, times(n), values(n*dim)] = 2+2n per actuator (dim=1)
+  nhistory = 0;
+  for (int i=0; i < actuators_.size(); i++) {
+    if (actuators_[i]->nsample > 0) {
+      nhistory += 2 + 2 * actuators_[i]->nsample;
+    }
+  }
+  // sensor delay: layout is [user, cursor, times(n), values(n*dim)] = 2 + n + n*dim
+  for (int i=0; i < sensors_.size(); i++) {
+    if (sensors_[i]->nsample > 0) {
+      nhistory += 2 + sensors_[i]->nsample + sensors_[i]->nsample * sensors_[i]->dim;
+    }
+  }
 
   // nnumericdata
-  for (int i=0; i < nnumeric; i++)nnumericdata += numerics_[i]->size;
+  for (int i=0; i < nnumeric; i++) {
+    nnumericdata += numerics_[i]->size;
+  }
 
   // ntextdata
-  for (int i=0; i < ntext; i++)ntextdata += (int)texts_[i]->data_.size() + 1;
+  for (int i=0; i < ntext; i++) {
+    ntextdata += (int)texts_[i]->data_.size() + 1;
+  }
 
   // ntupledata
-  for (int i=0; i < ntuple; i++)ntupledata += (int)tuples_[i]->objtype_.size();
+  for (int i=0; i < ntuple; i++) {
+    ntupledata += (int)tuples_[i]->objtype_.size();
+  }
 
   // npluginattr
-  for (int i=0; i < nplugin; i++)npluginattr += (int)plugins_[i]->flattened_attributes.size();
+  for (int i=0; i < nplugin; i++) {
+    npluginattr += (int)plugins_[i]->flattened_attributes.size();
+  }
 
   // nnames
   nnames = (int)modelname_.size() + 1;
@@ -2269,8 +2408,8 @@ void mjCModel::AutoSpringDamper(mjModel* m) {
     mjtNum damping = 2 * inertia / std::max(mjMINVAL, timeconst);
 
     // save stiffness and damping in the private mjsJoints
-    joints_[n]->stiffness = stiffness;
-    joints_[n]->damping = damping;
+    joints_[n]->stiffness[0] = stiffness;
+    joints_[n]->damping[0] = damping;
 
     // assign
     m->jnt_stiffness[n] = stiffness;
@@ -2321,10 +2460,6 @@ void mjCModel::LengthRange(mjModel* m, mjData* data) {
     m->opt.timestep = compiler.LRopt.timestep;
   }
 
-  // number of threads available
-  int hardware_threads = std::thread::hardware_concurrency();
-  const int nthread = mjMAX(1, mjMIN(kMaxCompilerThreads, hardware_threads/2));
-
   // count actuators that need computation
   int cnt = 0;
   for (int i=0; i < m->nu; i++) {
@@ -2349,6 +2484,8 @@ void mjCModel::LengthRange(mjModel* m, mjData* data) {
     cnt++;
   }
 
+  const auto nthread = NumCompilerThreads(cnt);
+
   // single thread
   if (!compiler.usethread || cnt < 2 || nthread < 2) {
     char err[200];
@@ -2362,8 +2499,11 @@ void mjCModel::LengthRange(mjModel* m, mjData* data) {
   // multiple threads
   else {
     // allocate mjData for each thread
-    char err[kMaxCompilerThreads][200];
-    mjData* pdata[kMaxCompilerThreads] = {data};
+    // using vectors to allow arbitrary number of threads without stack overflow
+    std::vector<std::vector<char>> err(nthread, std::vector<char>(200));
+    std::vector<mjData*> pdata(nthread);
+    pdata[0] = data;
+
     for (int i=1; i < nthread; i++) {
       pdata[i] = mj_makeData(m);
     }
@@ -2374,24 +2514,21 @@ void mjCModel::LengthRange(mjModel* m, mjData* data) {
       num++;
     }
 
-    // prepare thread function arguments, clear errors
-    LRThreadArg arg[kMaxCompilerThreads];
+    // prepare thread function arguments
+    std::vector<LRThreadArg> arg(nthread);
     for (int i=0; i < nthread; i++) {
-      LRThreadArg temp = {m, pdata[i], i*num, num, &compiler.LRopt, err[i], 200};
+      LRThreadArg temp = {
+          m, pdata[i], i * num, num, &compiler.LRopt, err[i].data(), 200};
       arg[i] = temp;
       err[i][0] = 0;
     }
 
-    // launch threads
-    std::thread th[kMaxCompilerThreads];
+    // launch threads and wait for them to finish
+    mujoco::user::ThreadPool pool(nthread);
     for (int i=0; i < nthread; i++) {
-      th[i] = std::thread(LRfunc, arg+i);
+      pool.Schedule([&arg, i]() { LRfunc(&arg[i]); });
     }
-
-    // wait for threads to finish
-    for (int i=0; i < nthread; i++) {
-      th[i].join();
-    }
+    pool.WaitCount(nthread);
 
     // free mjData allocated here
     for (int i=1; i < nthread; i++) {
@@ -2401,7 +2538,7 @@ void mjCModel::LengthRange(mjModel* m, mjData* data) {
     // report first error
     for (int i=0; i < nthread; i++) {
       if (err[i][0]) {
-        throw mjCError(0, "%s", err[i]);
+        throw mjCError(0, "%s", err[i].data());
       }
     }
   }
@@ -2681,7 +2818,8 @@ void mjCModel::CopyTree(mjModel* m) {
       m->jnt_bodyid[jid] = pj->body->id;
       mjuu_copyvec(m->jnt_pos+3*jid, pj->pos, 3);
       mjuu_copyvec(m->jnt_axis+3*jid, pj->axis, 3);
-      m->jnt_stiffness[jid] = (mjtNum)pj->stiffness;
+      m->jnt_stiffness[jid] = (mjtNum)pj->stiffness[0];
+      mjuu_copyvec(m->jnt_stiffnesspoly + mjNPOLY * jid, pj->stiffness + 1, mjNPOLY);
       mjuu_copyvec(m->jnt_range+2*jid, pj->range, 2);
       mjuu_copyvec(m->jnt_actfrcrange+2*jid, pj->actfrcrange, 2);
       mjuu_copyvec(m->jnt_solref+mjNREF*jid, pj->solref_limit, mjNREF);
@@ -2738,7 +2876,9 @@ void mjCModel::CopyTree(mjModel* m) {
         mjuu_copyvec(m->dof_solimp+mjNIMP*dofadr, pj->solimp_friction, mjNIMP);
         m->dof_frictionloss[dofadr] = (mjtNum)pj->frictionloss;
         m->dof_armature[dofadr] = (mjtNum)pj->armature;
-        m->dof_damping[dofadr] = (mjtNum)pj->damping;
+        m->dof_damping[dofadr] = (mjtNum)pj->damping[0];
+        mjuu_copyvec(m->dof_dampingpoly + mjNPOLY * dofadr, pj->damping + 1,
+                     mjNPOLY);
 
         // set dof_parentid, update body.lastdof
         m->dof_parentid[dofadr] = pb->lastdof;
@@ -2868,6 +3008,7 @@ void mjCModel::CopyTree(mjModel* m) {
       m->cam_fovy[cid] = (mjtNum)pc->fovy;
       m->cam_ipd[cid] = (mjtNum)pc->ipd;
       mjuu_copyvec(m->cam_resolution+2*cid, pc->resolution, 2);
+      m->cam_output[cid] = pc->output;
       mjuu_copyvec(m->cam_sensorsize+2*cid, pc->sensor_size, 2);
       mjuu_copyvec(m->cam_intrinsic+4*cid, pc->intrinsic, 4);
       mjuu_copyvec(m->cam_user+nuser_cam*cid, pc->get_userdata().data(), nuser_cam);
@@ -3074,7 +3215,46 @@ void mjCModel::CopyPlugins(mjModel* m) {
 
 
 
-// compute non-zeros in actuator_moment matrix
+// compute number of dofs for a given tendon
+int mjCModel::CountTendonDofs(const mjModel* m, int id) {
+  std::vector<bool> dof_used(m->nv, false);
+  int nv = m->nv;
+  int adr = m->tendon_adr[id];
+  int num = m->tendon_num[id];
+
+  if (m->wrap_type[adr] == mjWRAP_JOINT) {
+    return num;
+  }
+
+  std::fill(dof_used.begin(), dof_used.end(), false);
+  for (int j = 0; j < num; j++) {
+    int type = m->wrap_type[adr + j];
+    int bodyid = -1;
+    if (type == mjWRAP_SITE) {
+      bodyid = m->site_bodyid[m->wrap_objid[adr + j]];
+    } else if (type == mjWRAP_SPHERE || type == mjWRAP_CYLINDER) {
+      bodyid = m->geom_bodyid[m->wrap_objid[adr + j]];
+    }
+    if (bodyid > 0) {
+      int bid = bodyid;
+      while (bid > 0) {
+        int bdofadr = m->body_dofadr[bid];
+        int bdofnum = m->body_dofnum[bid];
+        for (int k = 0; k < bdofnum; k++) {
+          dof_used[bdofadr + k] = true;
+        }
+        bid = m->body_parentid[bid];
+      }
+    }
+  }
+
+  int count = 0;
+  for (int j = 0; j < nv; j++) {
+    count += dof_used[j];
+  }
+  return count;
+}
+
 int mjCModel::CountNJmom(const mjModel* m) {
   int nu = m->nu;
   int nv = m->nv;
@@ -3103,17 +3283,27 @@ int mjCModel::CountNJmom(const mjModel* m) {
             break;
         }
         break;
-      // TODO(taylorhowell): improve upper bounds
       case mjTRN_SLIDERCRANK:
-        count += nv;
+        {
+          int id_slider = m->actuator_trnid[2 * i + 1];
+          std::vector<int> chain(m->nv);
+          count += mj_mergeChain(m, chain.data(), m->site_bodyid[id],
+                                 m->site_bodyid[id_slider], 0);
+        }
         break;
 
       case mjTRN_TENDON:
-        count += nv;
+        count += CountTendonDofs(m, id);
         break;
 
       case mjTRN_SITE:
-        count += nv;
+        {
+          int refid = m->actuator_trnid[2 * i + 1];
+          int ref_body = refid >= 0 ? m->site_bodyid[refid] : 0;
+          std::vector<int> chain(m->nv);
+          count += mj_mergeChain(m, chain.data(), m->site_bodyid[id],
+                                 ref_body, /*flg_skipcommon=*/1);
+        }
         break;
 
       case mjTRN_BODY:
@@ -3129,20 +3319,31 @@ int mjCModel::CountNJmom(const mjModel* m) {
   return count;
 }
 
+// compute non-zeros in ten_J matrix
+int mjCModel::CountNJten(const mjModel* m) {
+  int ntendon = m->ntendon;
 
+  int count = 0;
+  for (int i = 0; i < ntendon; i++) {
+    count += CountTendonDofs(m, i);
+  }
+
+  return count;
+}
 
 // copy objects outside kinematic tree
 void mjCModel::CopyObjects(mjModel* m) {
-  int adr, bone_adr, vert_adr, node_adr, normal_adr, face_adr, texcoord_adr, oct_adr;
-  int edge_adr, elem_adr, elemdata_adr, elemedge_adr, shelldata_adr, evpair_adr;
-  int bonevert_adr, graph_adr, data_adr, bvh_adr;
-  int poly_adr, polymap_adr, polyvert_adr;
+  mjtSize adr, bone_adr, vert_adr, node_adr, normal_adr, face_adr, texcoord_adr, oct_adr;
+  mjtSize edge_adr, elem_adr, elemdata_adr, elemedge_adr, shelldata_adr, evpair_adr;
+  mjtSize bonevert_adr, graph_adr, data_adr, bvh_adr;
+  mjtSize poly_adr, polymap_adr, polyvert_adr;
 
   // sizes outside call to mj_makeModel
   m->nemax = nemax;
   m->njmax = njmax;
   m->nconmax = nconmax;
   m->nsensordata = nsensordata;
+  m->nhistory = nhistory;
   m->nuserdata = nuserdata;
   m->na = na;
 
@@ -3247,6 +3448,8 @@ void mjCModel::CopyObjects(mjModel* m) {
   shelldata_adr = 0;
   evpair_adr = 0;
   texcoord_adr = 0;
+  int standard_stiffness_size = 21 * m->nflexelem;
+  int current_extra_stiffness_adr = standard_stiffness_size;
   for (int i=0; i < nflex; i++) {
     // get pointer
     mjCFlex* pfl = flexes_[i];
@@ -3262,16 +3465,37 @@ void mjCModel::CopyObjects(mjModel* m) {
     mjuu_copyvec(m->flex_solref + mjNREF * i, pfl->solref, mjNREF);
     mjuu_copyvec(m->flex_solimp + mjNIMP * i, pfl->solimp, mjNIMP);
     m->flex_radius[i] = (mjtNum)pfl->radius;
+    mjuu_copyvec(m->flex_size + 3 * i, pfl->size, 3);
     mjuu_copyvec(m->flex_friction + 3 * i, pfl->friction, 3);
     m->flex_margin[i] = (mjtNum)pfl->margin;
     m->flex_gap[i] = (mjtNum)pfl->gap;
     mjuu_copyvec(m->flex_rgba + 4 * i, pfl->rgba, 4);
 
     // elasticity
-    if (!pfl->stiffness.empty()) {
-      mjuu_copyvec(m->flex_stiffness + 21 * elem_adr, pfl->stiffness.data(), pfl->stiffness.size());
+    if (pfl->spec.order == 0) {
+      m->flex_stiffnessadr[i] = 21 * elem_adr;
     } else {
-      mjuu_zerovec(m->flex_stiffness + 21 * elem_adr, 21 * pfl->nelem);
+      m->flex_stiffnessadr[i] = current_extra_stiffness_adr;
+      int npc = (int)pow(pfl->spec.order + 1, 3);
+      int ndof_cell = 3 * npc;
+      int ncells = pfl->spec.cellcount[0] * pfl->spec.cellcount[1] * pfl->spec.cellcount[2];
+      current_extra_stiffness_adr += ncells * ndof_cell * ndof_cell;
+    }
+
+    if (!pfl->stiffness.empty()) {
+      mjuu_copyvec(m->flex_stiffness + m->flex_stiffnessadr[i],
+                   pfl->stiffness.data(), pfl->stiffness.size());
+    } else {
+      int stiff_size;
+      if (pfl->spec.order == 0) {
+        stiff_size = 21 * pfl->nelem;
+      } else {
+        int npc = (int)pow(pfl->spec.order + 1, 3);
+        int ndof_cell = 3 * npc;
+        int ncells = pfl->spec.cellcount[0] * pfl->spec.cellcount[1] * pfl->spec.cellcount[2];
+        stiff_size = ncells * ndof_cell * ndof_cell;
+      }
+      mjuu_zerovec(m->flex_stiffness + m->flex_stiffnessadr[i], stiff_size);
     }
     if (!pfl->bending.empty()) {
       mjuu_copyvec(m->flex_bending + 17 * edge_adr, pfl->bending.data(), pfl->bending.size());
@@ -3333,10 +3557,26 @@ void mjCModel::CopyObjects(mjModel* m) {
     // find equality constraint referencing this flex
     m->flex_edgeequality[i] = 0;
     for (int k=0; k < (int)equalities_.size(); k++) {
-      if (equalities_[k]->type == mjEQ_FLEX && equalities_[k]->name1_ == pfl->name) {
-        m->flex_edgeequality[i] = 1;
-        break;
+      if (equalities_[k]->name1_ == pfl->name) {
+        if (equalities_[k]->type == mjEQ_FLEX) {
+          m->flex_edgeequality[i] = 1;
+          break;
+        }
+        if (equalities_[k]->type == mjEQ_FLEXVERT) {
+          m->flex_edgeequality[i] = 2;
+          break;
+        }
+        if (equalities_[k]->type == mjEQ_FLEXSTRAIN) {
+          m->flex_edgeequality[i] = 3;
+          break;
+        }
       }
+    }
+
+    if (!pfl->rigid && m->flex_edgeequality[i] == 0 &&
+        !pfl->edgestiffness && !pfl->edgedamping && !pfl->damping) {
+      mju_warning("flex '%s' is not rigid and has no equality constraints "
+                  "or passive forces", pfl->name.c_str());
     }
 
     // copy bvh data (flex aabb computed dynamically in mjData)
@@ -3390,7 +3630,12 @@ void mjCModel::CopyObjects(mjModel* m) {
     }
 
     // set interpolation type, only two types for now
-    m->flex_interp[i] = pfl->order_;
+    m->flex_interp[i] = pfl->spec.order;
+
+    // set cell count for multi-cell finite cell method
+    m->flex_cellnum[3*i+0] = pfl->spec.cellcount[0];
+    m->flex_cellnum[3*i+1] = pfl->spec.cellcount[1];
+    m->flex_cellnum[3*i+2] = pfl->spec.cellcount[2];
 
     // convert edge pairs to int array, set edge rigid
     for (int k=0; k < pfl->nedge; k++) {
@@ -3412,6 +3657,8 @@ void mjCModel::CopyObjects(mjModel* m) {
         int b1 = pfl->vertbodyid[pfl->edge[k].first];
         int b2 = pfl->vertbodyid[pfl->edge[k].second];
         m->flexedge_rigid[edge_adr+k] = (bodies_[b1]->weldid == bodies_[b2]->weldid);
+      } else {
+        m->flexedge_rigid[edge_adr+k] = 0;
       }
     }
 
@@ -3502,7 +3749,8 @@ void mjCModel::CopyObjects(mjModel* m) {
     m->hfield_adr[i] = data_adr;
 
     // copy elevation data
-    memcpy(m->hfield_data + data_adr, phf->data.data(), phf->nrow*phf->ncol*sizeof(float));
+    memcpy(m->hfield_data + data_adr, phf->data.data(),
+           static_cast<mjtSize>(phf->nrow) * phf->ncol * sizeof(float));
 
     // advance counter
     data_adr += phf->nrow*phf->ncol;
@@ -3523,11 +3771,11 @@ void mjCModel::CopyObjects(mjModel* m) {
     m->tex_adr[i] = data_adr;
 
     // copy rgb data
-    memcpy(m->tex_data + data_adr, ptex->data_.data(),
-           ptex->nchannel * ptex->width * ptex->height);
+    mjtSize nbytes = static_cast<mjtSize>(ptex->nchannel) * ptex->width * ptex->height;
+    memcpy(m->tex_data + data_adr, ptex->data_.data(), nbytes);
 
     // advance counter
-    data_adr += ptex->nchannel * ptex->width * ptex->height;
+    data_adr += nbytes;
   }
 
   // materials
@@ -3608,8 +3856,10 @@ void mjCModel::CopyObjects(mjModel* m) {
     m->tendon_actfrcrange[2*i] = (mjtNum)pte->actfrcrange[0];
     m->tendon_actfrcrange[2*i+1] = (mjtNum)pte->actfrcrange[1];
     m->tendon_margin[i] = (mjtNum)pte->margin;
-    m->tendon_stiffness[i] = (mjtNum)pte->stiffness;
-    m->tendon_damping[i] = (mjtNum)pte->damping;
+    m->tendon_stiffness[i] = (mjtNum)pte->stiffness[0];
+    mjuu_copyvec(m->tendon_stiffnesspoly + mjNPOLY * i, pte->stiffness + 1, mjNPOLY);
+    m->tendon_damping[i] = (mjtNum)pte->damping[0];
+    mjuu_copyvec(m->tendon_dampingpoly + mjNPOLY * i, pte->damping + 1, mjNPOLY);
     m->tendon_armature[i] = (mjtNum)pte->armature;
     m->tendon_frictionloss[i] = (mjtNum)pte->frictionloss;
     m->tendon_lengthspring[2*i] = (mjtNum)pte->springlength[0];
@@ -3633,6 +3883,7 @@ void mjCModel::CopyObjects(mjModel* m) {
 
   // actuators
   adr = 0;
+  int delay_adr = 0;
   for (int i=0; i < nu; i++) {
     // get pointer
     mjCActuator* pac = actuators_[i];
@@ -3650,12 +3901,27 @@ void mjCModel::CopyObjects(mjModel* m) {
     pac->actdim_ = m->actuator_actnum[i];
     adr += m->actuator_actnum[i];
     m->actuator_group[i] = pac->group;
+
+    // historyadr
+    m->actuator_delay[i] = (mjtNum)pac->delay;
+    m->actuator_history[2*i] = pac->nsample;
+    m->actuator_history[2*i+1] = pac->interp;
+    if (pac->nsample > 0) {
+      m->actuator_historyadr[i] = delay_adr;
+      delay_adr += 2 + 2 * pac->nsample;  // [user, cursor, times, values]
+    } else {
+      m->actuator_historyadr[i] = -1;
+    }
+
     m->actuator_ctrllimited[i] = (mjtByte)pac->is_ctrllimited();
     m->actuator_forcelimited[i] = (mjtByte)pac->is_forcelimited();
     m->actuator_actlimited[i] = (mjtByte)pac->is_actlimited();
     m->actuator_actearly[i] = pac->actearly;
     m->actuator_cranklength[i] = (mjtNum)pac->cranklength;
     mjuu_copyvec(m->actuator_gear + 6*i, pac->gear, 6);
+    m->actuator_damping[i] = (mjtNum)pac->damping[0];
+    mjuu_copyvec(m->actuator_dampingpoly + mjNPOLY*i, pac->damping + 1, mjNPOLY);
+    m->actuator_armature[i] = (mjtNum)pac->armature;
     mjuu_copyvec(m->actuator_dynprm + mjNDYN*i, pac->dynprm, mjNDYN);
     mjuu_copyvec(m->actuator_gainprm + mjNGAIN*i, pac->gainprm, mjNGAIN);
     mjuu_copyvec(m->actuator_biasprm + mjNBIAS*i, pac->biasprm, mjNBIAS);
@@ -3684,6 +3950,21 @@ void mjCModel::CopyObjects(mjModel* m) {
     m->sensor_dim[i] = psen->dim;
     m->sensor_cutoff[i] = (mjtNum)psen->cutoff;
     m->sensor_noise[i] = (mjtNum)psen->noise;
+
+    // history buffer
+    m->sensor_delay[i] = (mjtNum)psen->delay;
+    m->sensor_history[2*i] = psen->nsample;
+    m->sensor_history[2*i+1] = psen->interp;
+    m->sensor_interval[2*i] = (mjtNum)psen->interval[0];
+    m->sensor_interval[2*i+1] = (mjtNum)psen->interval[1];
+    if (psen->nsample > 0) {
+      m->sensor_historyadr[i] = delay_adr;
+      int dim = psen->dim;
+      delay_adr += 2 + psen->nsample + psen->nsample * dim;  // [user, cursor, times(n), values(n*dim)]
+    } else {
+      m->sensor_historyadr[i] = -1;
+    }
+
     mjuu_copyvec(m->sensor_user+nuser_sensor*i, psen->get_userdata().data(), nuser_sensor);
 
     // calculate address and advance
@@ -4047,6 +4328,8 @@ void mjCModel::FuseReindex(mjCBody* body) {
   makelistid(joints_, body->joints);
   makelistid(geoms_, body->geoms);
   makelistid(sites_, body->sites);
+  makelistid(cameras_, body->cameras);
+  makelistid(lights_, body->lights);
 
   // process children recursively
   for (int i=0; i < body->bodies.size(); i++) {
@@ -4174,10 +4457,25 @@ void mjCModel::FuseStatic(void) {
       mju_error("Internal error: FuseStatic: body not found");
     }
 
-    //------------- assign geoms and sites to parent, change frames
+    //------------- assign geoms, sites, cameras, lights to parent, change frames
 
     ReassignChild(par->geoms, body->geoms, par, body);
     ReassignChild(par->sites, body->sites, par, body);
+    ReassignChild(par->cameras, body->cameras, par, body);
+
+    // lights have dir instead of quat, so handle separately
+    for (int j=0; j < body->lights.size(); j++) {
+      body->lights[j]->body = par;
+      par->lights.push_back(body->lights[j]);
+
+      // transform pos into parent frame
+      double qunit[4] = {1, 0, 0, 0};
+      changeframe(body->lights[j]->pos, qunit, body->pos, body->quat);
+
+      // rotate dir into parent frame
+      mjuu_rotVecQuat(body->lights[j]->dir, body->lights[j]->dir, body->quat);
+    }
+    body->lights.clear();
 
     //------------- remove from global body list, reduce global counts
 
@@ -4209,6 +4507,8 @@ void mjCModel::FuseStatic(void) {
     joints_.clear();
     geoms_.clear();
     sites_.clear();
+    cameras_.clear();
+    lights_.clear();
     FuseReindex(bodies_[0]);
 
     // recompute parent contype, conaffinity, and margin
@@ -4408,7 +4708,9 @@ mjModel* mjCModel::Compile(const mjVFS* vfs, mjModel** m) {
       }
       throw mjCError(0, "engine error: %s", error_msg.c_str());
     }
-    TryCompile(*const_cast<mjModel**>(&model), *const_cast<mjData**>(&data), vfs);
+
+    TryCompile(*const_cast<mjModel**>(&model), *const_cast<mjData**>(&data),
+               vfs);
   } catch (mjCError err) {
     // deallocate everything allocated in Compile
     mj_deleteModel(model);
@@ -4438,16 +4740,14 @@ mjModel* mjCModel::Compile(const mjVFS* vfs, mjModel** m) {
 }
 
 
-
-// mesh compilation function to be used in threads
-void CompileMesh(mjCMesh* mesh, const mjVFS* vfs, std::exception_ptr& exception,
-                 std::mutex& exception_mutex, std::string* warningtext) {
-  // set warning text buffer to this local thread
+// Helper function for mesh compilation used by both serial and parallel paths
+static void CompileMesh(mjCMesh* mesh, const mjVFS* vfs,
+                        std::exception_ptr& exception, std::mutex& exception_mutex,
+                        std::string* warningtext) {
   local_warningtext_ptr = warningtext;
   auto previous_handler = _mjPRIVATE__get_tls_warning_fn();
   _mjPRIVATE__set_tls_warning_fn(warninghandler);
 
-  // compile the mesh, catch exception to be rethrown later
   try {
     mesh->Compile(vfs);
   } catch (...) {
@@ -4457,47 +4757,84 @@ void CompileMesh(mjCMesh* mesh, const mjVFS* vfs, std::exception_ptr& exception,
     }
   }
 
-  // restore warning handler to top-level
   _mjPRIVATE__set_tls_warning_fn(previous_handler);
   local_warningtext_ptr = nullptr;
 }
 
+// Helper function for texture compilation used by both serial and parallel paths
+static void CompileTexture(mjCTexture* texture, const mjVFS* vfs,
+                           std::exception_ptr& exception,
+                           std::mutex& exception_mutex, std::string* warningtext) {
+  local_warningtext_ptr = warningtext;
+  auto previous_handler = _mjPRIVATE__get_tls_warning_fn();
+  _mjPRIVATE__set_tls_warning_fn(warninghandler);
 
-
-// multi-threaded mesh compilation
-void mjCModel::CompileMeshes(const mjVFS* vfs) {
-  std::vector<std::thread> threads;
-  int nmesh = meshes_.size();
-  int hardware_threads = std::thread::hardware_concurrency() / 2;
-  int maxthread = std::min(nmesh, std::min(kMaxCompilerThreads, hardware_threads));
-  int nthread = std::max(1, maxthread);
-
-  threads.reserve(nthread);
-
-  // holds an exception thrown by a worker thread
-  std::exception_ptr exception;
-  std::mutex except_mutex;
-
-  std::atomic_int next_mesh = 0;
-  std::vector<std::string> mesh_warningtext(nmesh);
-  for (int i = 0; i < nthread; ++i) {
-    threads.emplace_back([&] {
-      for (int meshid = next_mesh++; meshid < nmesh; meshid = next_mesh++) {
-        auto& mesh = meshes_[meshid];
-        CompileMesh(mesh, vfs, exception, except_mutex,
-                    &mesh_warningtext[meshid]);
-      }
-    });
-  }
-
-  // join threads
-  for (auto& thread : threads) {
-    if (thread.joinable()) {
-      thread.join();
+  try {
+    texture->Compile(vfs);
+  } catch (...) {
+    std::lock_guard<std::mutex> lock(exception_mutex);
+    if (!exception) {
+      exception = std::current_exception();
     }
   }
 
-  // concatenate all warnings from threads, copy into warningtext
+  _mjPRIVATE__set_tls_warning_fn(previous_handler);
+  local_warningtext_ptr = nullptr;
+}
+
+// multi-threaded mesh and texture compilation with shared threadpool
+void mjCModel::CompileMeshesAndTextures(const mjVFS* vfs) {
+  int nmesh = meshes_.size();
+  int ntexture = textures_.size();
+  int total_tasks = nmesh + ntexture;
+
+  // holds exceptions thrown by worker threads
+  std::exception_ptr mesh_exception;
+  std::mutex mesh_except_mutex;
+  std::exception_ptr texture_exception;
+  std::mutex texture_except_mutex;
+
+  std::vector<std::string> mesh_warningtext(nmesh);
+  std::vector<std::string> texture_warningtext(ntexture);
+
+  // If no pool provided or too few total tasks, run serially
+  if (!compiler.usethread || total_tasks < 2) {
+    // Compile meshes serially
+    for (int i = 0; i < nmesh; i++) {
+      CompileMesh(meshes_[i], vfs, mesh_exception, mesh_except_mutex,
+                  &mesh_warningtext[i]);
+    }
+    // Compile textures serially
+    for (int i = 0; i < ntexture; i++) {
+      CompileTexture(textures_[i], vfs, texture_exception,
+                     texture_except_mutex, &texture_warningtext[i]);
+    }
+  } else {
+    mujoco::user::ThreadPool pool(NumCompilerThreads(total_tasks));
+
+    // Enqueue mesh tasks
+    for (int i = 0; i < nmesh; ++i) {
+      pool.Schedule([mesh = meshes_[i], vfs, &mesh_exception,
+                     &mesh_except_mutex, warningtext = &mesh_warningtext[i]]() {
+        CompileMesh(mesh, vfs, mesh_exception, mesh_except_mutex, warningtext);
+      });
+    }
+
+    // Enqueue texture tasks
+    for (int i = 0; i < ntexture; ++i) {
+      pool.Schedule([texture = textures_[i], vfs, &texture_exception,
+                     &texture_except_mutex,
+                     warningtext = &texture_warningtext[i]]() {
+        CompileTexture(texture, vfs, texture_exception, texture_except_mutex,
+                       warningtext);
+      });
+    }
+
+    // Wait for all tasks to complete
+    pool.WaitCount(total_tasks);
+  }
+
+  // concatenate all mesh warnings, copy into warningtext
   std::string concatenated_warnings;
   bool has_warning = false;
   for (int i = 0; i < nmesh; i++) {
@@ -4511,13 +4848,23 @@ void mjCModel::CompileMeshes(const mjVFS* vfs) {
   }
   mju::strcpy_arr(warningtext, concatenated_warnings.c_str());
 
-  // if exception was caught, rethrow it
-  if (exception) {
-    std::rethrow_exception(exception);
+  // aggregate texture warnings
+  for (int i = 0; i < ntexture; ++i) {
+    if (!texture_warningtext[i].empty()) {
+      if (has_warning) mju::strcat_arr(warningtext, "\n");
+      mju::strcat_arr(warningtext, texture_warningtext[i].c_str());
+      has_warning = true;
+    }
+  }
+
+  // if exceptions were caught, rethrow the first one
+  if (mesh_exception) {
+    std::rethrow_exception(mesh_exception);
+  }
+  if (texture_exception) {
+    std::rethrow_exception(texture_exception);
   }
 }
-
-
 
 // compute qpos0
 void mjCModel::ComputeReference() {
@@ -4643,9 +4990,21 @@ void mjCModel::ResolveKeyframes(const mjModel* m) {
   key_pending_.clear();
 }
 
-
-
 void mjCModel::TryCompile(mjModel*& m, mjData*& d, const mjVFS* vfs) {
+#if defined(__EMSCRIPTEN__) && !defined(MUJOCO_WASM_THREADS)
+  // The MuJoCo compiler defaults to usethread=1, which causes it to try to
+  // create pthreads for compilation. In the single-threaded WASM build, this
+  // crashes because there is no threading support, so we disable threading on
+  // the internal compiler struct (not the spec) to avoid permanently mutating
+  // the spec (which would cause usethread="false" to appear in a saved XML).
+  struct ScopedDisableThreading {
+    mjtByte& ref;
+    mjtByte saved;
+    explicit ScopedDisableThreading(mjtByte& r) : ref(r), saved(r) { ref = 0; }
+    ~ScopedDisableThreading() { ref = saved; }
+  } disable_usethread(compiler.usethread);
+#endif
+
   // check if nan test works
   double test = mjNAN;
   if (mjuu_defined(test)) {
@@ -4746,16 +5105,8 @@ void mjCModel::TryCompile(mjModel*& m, mjData*& d, const mjVFS* vfs) {
   // automatically set nuser fields
   SetNuser();
 
-  // compile meshes (needed for geom compilation)
-  if (!compiler.usethread && meshes_.size() > 1) {
-    // multi-threaded mesh compile
-    CompileMeshes(vfs);
-  } else {
-    // single-threaded mesh compile
-    for (int i=0; i < meshes_.size(); i++) {
-      meshes_[i]->Compile(vfs);
-    }
-  }
+  // compile meshes and textures (needed for geom compilation)
+  CompileMeshesAndTextures(vfs);
 
   // compile objects in kinematic tree
   for (int i=0; i < bodies_.size(); i++) {
@@ -4777,7 +5128,7 @@ void mjCModel::TryCompile(mjModel*& m, mjData*& d, const mjVFS* vfs) {
   for (auto flex : flexes_) flex->Compile(vfs);
   for (auto skin : skins_) skin->Compile(vfs);
   for (auto hfield : hfields_) hfield->Compile(vfs);
-  for (auto texture : textures_) texture->Compile(vfs);
+
   for (auto material : materials_) material->Compile();
   for (auto pair : pairs_) pair->Compile();
   for (auto exclude : excludes_) exclude->Compile();
@@ -4830,12 +5181,12 @@ void mjCModel::TryCompile(mjModel*& m, mjData*& d, const mjVFS* vfs) {
   mj_makeModel(&m,
                nq, nv, nu, na, nbody, nbvh, nbvhstatic, nbvhdynamic, noct, njnt, ntree, nM, nB, nC,
                nD, ngeom, nsite, ncam, nlight, nflex, nflexnode, nflexvert, nflexedge, nflexelem,
-               nflexelemdata, nflexelemedge, nflexshelldata, nflexevpair, nflextexcoord,
-               nmesh, nmeshvert, nmeshnormal, nmeshtexcoord, nmeshface, nmeshgraph, nmeshpoly,
-               nmeshpolyvert, nmeshpolymap, nskin, nskinvert, nskintexvert, nskinface, nskinbone,
-               nskinbonevert, nhfield, nhfielddata, ntex, ntexdata, nmat, npair, nexclude,
-               neq, ntendon, nwrap, nsensor, nnumeric, nnumericdata, ntext, ntextdata,
-               ntuple, ntupledata, nkey, nmocap, nplugin, npluginattr,
+               nflexelemdata, nflexstiffness, nflexelemedge, nflexshelldata, nflexevpair,
+               nflextexcoord, nJfe, nJfv, nmesh, nmeshvert, nmeshnormal, nmeshtexcoord, nmeshface,
+               nmeshgraph, nmeshpoly, nmeshpolyvert, nmeshpolymap, nskin, nskinvert, nskintexvert,
+               nskinface, nskinbone, nskinbonevert, nhfield, nhfielddata, ntex, ntexdata, nmat,
+               npair, nexclude, neq, ntendon, nJten, nwrap, nsensor, nnumeric, nnumericdata, ntext,
+               ntextdata, ntuple, ntupledata, nkey, nmocap, nplugin, npluginattr,
                nuser_body, nuser_jnt, nuser_geom, nuser_site, nuser_cam,
                nuser_tendon, nuser_actuator, nuser_sensor, nnames, npaths);
   if (!m) {
@@ -4865,6 +5216,7 @@ void mjCModel::TryCompile(mjModel*& m, mjData*& d, const mjVFS* vfs) {
 
   // compute non-zeros in actuator_moment
   m->nJmom = nJmom = CountNJmom(m);
+
 
   // scale mass
   if (compiler.settotalmass > 0) {
@@ -5039,8 +5391,6 @@ void mjCModel::TryCompile(mjModel*& m, mjData*& d, const mjVFS* vfs) {
     throw mjCError(0, "signature mismatch");  // SHOULD NOT OCCUR
   }
 }
-
-
 
 static void PrintIndent(std::stringstream& ss, int depth) {
   // A static string of spaces, created only once during the program's lifetime.
@@ -5262,7 +5612,8 @@ bool mjCModel::CopyBack(const mjModel* m) {
     // joint data
     mjuu_copyvec(pj->pos, m->jnt_pos+3*i, 3);
     mjuu_copyvec(pj->axis, m->jnt_axis+3*i, 3);
-    pj->stiffness = (double)m->jnt_stiffness[i];
+    pj->stiffness[0] = (double)m->jnt_stiffness[i];
+    mjuu_copyvec(pj->stiffness + 1, m->jnt_stiffnesspoly + mjNPOLY * i, mjNPOLY);
     mjuu_copyvec(pj->range, m->jnt_range+2*i, 2);
     mjuu_copyvec(pj->solref_limit, m->jnt_solref+mjNREF*i, mjNREF);
     mjuu_copyvec(pj->solimp_limit, m->jnt_solimp+mjNIMP*i, mjNIMP);
@@ -5277,7 +5628,8 @@ bool mjCModel::CopyBack(const mjModel* m) {
     mjuu_copyvec(pj->solref_friction, m->dof_solref+mjNREF*j, mjNREF);
     mjuu_copyvec(pj->solimp_friction, m->dof_solimp+mjNIMP*j, mjNIMP);
     pj->armature = (double)m->dof_armature[j];
-    pj->damping = (double)m->dof_damping[j];
+    pj->damping[0] = (double)m->dof_damping[j];
+    mjuu_copyvec(pj->damping + 1, m->dof_dampingpoly + mjNPOLY * j, mjNPOLY);
     pj->frictionloss = (double)m->dof_frictionloss[j];
   }
 
@@ -5400,8 +5752,10 @@ bool mjCModel::CopyBack(const mjModel* m) {
     mjuu_copyvec(tendons_[i]->rgba, m->tendon_rgba+4*i, 4);
     tendons_[i]->width = (double)m->tendon_width[i];
     tendons_[i]->margin = (double)m->tendon_margin[i];
-    tendons_[i]->stiffness = (double)m->tendon_stiffness[i];
-    tendons_[i]->damping = (double)m->tendon_damping[i];
+    tendons_[i]->stiffness[0] = (double)m->tendon_stiffness[i];
+    mjuu_copyvec(tendons_[i]->stiffness + 1, m->tendon_stiffnesspoly + mjNPOLY * i, mjNPOLY);
+    tendons_[i]->damping[0] = (double)m->tendon_damping[i];
+    mjuu_copyvec(tendons_[i]->damping + 1, m->tendon_dampingpoly + mjNPOLY * i, mjNPOLY);
     tendons_[i]->armature = (double)m->tendon_armature[i];
     tendons_[i]->frictionloss = (double)m->tendon_frictionloss[i];
 
@@ -5423,6 +5777,9 @@ bool mjCModel::CopyBack(const mjModel* m) {
     mjuu_copyvec(pa->actrange, m->actuator_actrange+2*i, 2);
     mjuu_copyvec(pa->lengthrange, m->actuator_lengthrange+2*i, 2);
     mjuu_copyvec(pa->gear, m->actuator_gear+6*i, 6);
+    pa->damping[0] = (double)m->actuator_damping[i];
+    mjuu_copyvec(pa->damping + 1, m->actuator_dampingpoly + mjNPOLY*i, mjNPOLY);
+    pa->armature = (double)m->actuator_armature[i];
     pa->cranklength = (double)m->actuator_cranklength[i];
 
     if (nuser_actuator) {

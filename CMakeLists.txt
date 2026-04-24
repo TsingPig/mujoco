@@ -29,7 +29,7 @@ set(MSVC_INCREMENTAL_DEFAULT ON)
 
 project(
   mujoco
-  VERSION 3.4.1
+  VERSION 3.8.0
   DESCRIPTION "MuJoCo Physics Simulator"
   HOMEPAGE_URL "https://mujoco.org"
 )
@@ -47,11 +47,55 @@ if(NOT EMSCRIPTEN)
   option(MUJOCO_TEST_PYTHON_UTIL "Build and test utility libraries for Python bindings" ON)
   option(MUJOCO_WITH_USD "Build with OpenUSD" OFF)
   option(MUJOCO_USE_FILAMENT "Use filament rendering" OFF)
-  option(MUJOCO_USE_FILAMENT_VULKAN "Use vulkan backend for filament rendering" OFF)
+  # Allows filament renderer to be used with mjr API; disables src/render to prevent conflicts.
+  option(MUJOCO_USE_FILAMENT_MJR_COMPAT "Use filament mjr compatibility layer" OFF)
 endif()
 
 if(EMSCRIPTEN)
   option(MUJOCO_BUILD_TESTS_WASM "Build tests for WASM bindings" ON)
+  option(MUJOCO_BUILD_STUDIO "Build studio for MuJoCo (WASM)" OFF)
+  option(MUJOCO_USE_FILAMENT "Use filament rendering" OFF)
+  option(MUJOCO_WASM_THREADS "Build with multi-threading support" ON)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20 -O3 -fexceptions")
+  if(MUJOCO_WASM_THREADS)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+  endif()
+
+  # Filament uses the WEBGL variable (not EMSCRIPTEN) to identify web builds.
+  # Without this, it falls into the LINUX path and tries to compile with
+  # futex, X11, Vulkan, etc.
+  if(MUJOCO_USE_FILAMENT)
+    set(WEBGL ON CACHE BOOL "Filament WebGL mode" FORCE)
+  endif()
+
+  # Automatically generate host tool imports for Filament cross-compilation.
+  # When WEBGL is true, Filament hardcodes the path to:
+  #   ${FILAMENT}/${IMPORT_EXECUTABLES_DIR}/ImportExecutables-Release.cmake
+  # So we write our file with that exact name and set IMPORT_EXECUTABLES_DIR
+  # to point at CMAKE_BINARY_DIR (which is ../../ relative to filament-src).
+  set(MUJOCO_NATIVE_BUILD_DIR "${PROJECT_SOURCE_DIR}/build-host" CACHE PATH "Path to native build directory containing host tools")
+  find_program(MATC_EXE matc PATHS "${MUJOCO_NATIVE_BUILD_DIR}/bin" NO_DEFAULT_PATH)
+  find_program(RESGEN_EXE resgen PATHS "${MUJOCO_NATIVE_BUILD_DIR}/bin" NO_DEFAULT_PATH)
+  find_program(CMGEN_EXE cmgen PATHS "${MUJOCO_NATIVE_BUILD_DIR}/bin" NO_DEFAULT_PATH)
+
+  if(MATC_EXE AND RESGEN_EXE AND CMGEN_EXE)
+    message(STATUS "Found host tools in ${MUJOCO_NATIVE_BUILD_DIR}/bin")
+    set(IMPORT_EXECUTABLES_FILE "${CMAKE_BINARY_DIR}/ImportExecutables-Release.cmake")
+    file(WRITE "${IMPORT_EXECUTABLES_FILE}"
+      "add_executable(matc IMPORTED)\n"
+      "set_property(TARGET matc PROPERTY IMPORTED_LOCATION \"${MATC_EXE}\")\n"
+      "add_executable(resgen IMPORTED)\n"
+      "set_property(TARGET resgen PROPERTY IMPORTED_LOCATION \"${RESGEN_EXE}\")\n"
+      "add_executable(cmgen IMPORTED)\n"
+      "set_property(TARGET cmgen PROPERTY IMPORTED_LOCATION \"${CMGEN_EXE}\")\n"
+    )
+    # Filament's WEBGL path resolves: ${FILAMENT}/${IMPORT_EXECUTABLES_DIR}/ImportExecutables-Release.cmake
+    # FILAMENT = _deps/filament-src, so ../../ resolves to CMAKE_BINARY_DIR.
+    set(IMPORT_EXECUTABLES_DIR "../../" CACHE PATH "" FORCE)
+  else()
+    message(WARNING "Host tools (matc, resgen, cmgen) not found in ${MUJOCO_NATIVE_BUILD_DIR}/bin. WASM build of Studio might fail.")
+  endif()
 endif()
 
 if(APPLE AND (MUJOCO_BUILD_EXAMPLES OR MUJOCO_BUILD_SIMULATE))
@@ -107,28 +151,25 @@ if(NOT EMSCRIPTEN)
   add_subdirectory(plugin/sensor)
   add_subdirectory(plugin/sdf)
 endif()
+add_subdirectory(plugin/obj_decoder)
+add_subdirectory(plugin/stl_decoder)
+
 add_subdirectory(src/engine)
 add_subdirectory(src/user)
 add_subdirectory(src/xml)
 add_subdirectory(src/thread)
-
-if(MUJOCO_USE_FILAMENT AND NOT EMSCRIPTEN)
-  # Note that, by default, the "src/render" and "src/ui" code is added directly
-  # into the "mujoco" target. However, "mujoco::filament" is a separate,
-  # explicit target. Therefore, if you want to use MuJoCo with Filament, you
-  # will need to explicitly add the "mujoco::filament" target as a link
-  # dependency in your project.
-  add_subdirectory(src/experimental/filament)
-elseif(NOT EMSCRIPTEN)
-  add_subdirectory(src/render)
+if(NOT EMSCRIPTEN AND NOT MUJOCO_USE_FILAMENT_MJR_COMPAT)
+  add_subdirectory(src/render/classic)
   add_subdirectory(src/ui)
+endif()
+add_subdirectory(src/render/noop)
+
+if(MUJOCO_USE_FILAMENT)
+  add_subdirectory(src/experimental/filament)
 endif()
 
 if(EMSCRIPTEN)
   add_subdirectory(wasm)
-  if(MUJOCO_BUILD_TESTS_WASM)
-    add_subdirectory(wasm/tests)
-  endif()
 endif()
 
 
@@ -215,6 +256,7 @@ if(MUJOCO_BUILD_SIMULATE)
 endif()
 
 if(MUJOCO_BUILD_STUDIO)
+  add_subdirectory(src/experimental/mjz)
   add_subdirectory(src/experimental/platform)
   add_subdirectory(src/experimental/studio)
 endif()
@@ -243,6 +285,7 @@ if(MUJOCO_WITH_USD)
   endif()
 
   add_subdirectory(src/experimental/usd)
+  add_subdirectory(plugin/usd_decoder)
 endif()
 
 if(BUILD_TESTING AND MUJOCO_BUILD_TESTS)

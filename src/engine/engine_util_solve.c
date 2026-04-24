@@ -144,10 +144,7 @@ int mju_cholFactorSparse(mjtNum* mat, int n, mjtNum mindiag,
                          int* rownnz, const int* rowadr, int* colind,
                          mjData* d) {
   int rank = n;
-
-  mj_markStack(d);
-  mjtNum* buf = mjSTACKALLOC(d, n, mjtNum);
-  int* buf_ind = mjSTACKALLOC(d, n, int);
+  (void) d;
 
   // backpass over rows
   for (int r=n-1; r >= 0; r--) {
@@ -175,15 +172,13 @@ int mju_cholFactorSparse(mjtNum* mat, int n, mjtNum mindiag,
 
       // mat(c,0:c) = mat(c,0:c) - mat(r,c) * mat(r,0:c)
       int nnz_c = mju_combineSparse(mat + rowadr[c], mat+rowadr[r], 1, -mat[adr+i],
-                                    rownnz[c], i+1, colind+rowadr[c], colind+rowadr[r],
-                                    buf, buf_ind);
+                                    rownnz[c], i+1, colind+rowadr[c], colind+rowadr[r]);
 
       // assign new nnz to row c
       rownnz[c] = nnz_c;
     }
   }
 
-  mj_freeStack(d);
   return rank;
 }
 
@@ -883,6 +878,37 @@ void mju_solveLUSparse(mjtNum* res, const mjtNum* LU, const mjtNum* vec, int n,
 }
 
 
+//--------------------------- 3x3 linear solve -----------------------------------------------------
+
+// solve 3x3 linear system A*x = b using Gaussian elimination
+void mju_solve3(mjtNum x[3], const mjtNum A[9], const mjtNum b[3]) {
+  mjtNum M[3][4] = {
+    {A[0], A[1], A[2], b[0]},
+    {A[3], A[4], A[5], b[1]},
+    {A[6], A[7], A[8], b[2]}
+  };
+
+  for (int i=0; i<3; i++) {
+    mjtNum pivot = M[i][i];
+    for (int j=i; j<4; j++) {
+      M[i][j] /= pivot;
+    }
+
+    for (int k=0; k<3; k++) {
+      if (k != i) {
+        mjtNum factor = M[k][i];
+        for (int j=i; j<4; j++) {
+          M[k][j] -= factor * M[i][j];
+        }
+      }
+    }
+  }
+  x[0] = M[0][3];
+  x[1] = M[1][3];
+  x[2] = M[2][3];
+}
+
+
 //--------------------------- eigen decomposition --------------------------------------------------
 
 // eigenvalue decomposition of symmetric 3x3 matrix
@@ -1534,12 +1560,15 @@ int mju_boxQPoption(mjtNum* res, mjtNum* R, int* index,               // outputs
 
 
     // print iteration info
-    if (log) {
-      logptr += snprintf(log+logptr, logsz-logptr,
-                         "iter %-3d:  |grad|: %-8.2g  reduction: %-8.2g  improvement: %-8.4g  "
-                         "linesearch: %g^%-2d  factorized: %d  nfree: %d\n",
-                         iter+1, mju_sqrt(norm2), oldvalue-value, improvement,
-                         backtrack, nstep-1, factorize, nfree);
+    if (log && logptr < logsz) {
+      int written = snprintf(log+logptr, logsz-logptr,
+                             "iter %-3d:  |grad|: %-8.2g  reduction: %-8.2g  improvement: %-8.4g  "
+                             "linesearch: %g^%-2d  factorized: %d  nfree: %d\n",
+                             iter+1, mju_sqrt(norm2), oldvalue-value, improvement,
+                             backtrack, nstep-1, factorize, nfree);
+      if (written > 0) {
+        logptr = mjMIN(logptr + written, logsz);
+      }
     }
 
     // accept candidate
@@ -1552,7 +1581,7 @@ int mju_boxQPoption(mjtNum* res, mjtNum* R, int* index,               // outputs
   }
 
   // print final info
-  if (log) {
+  if (log && logptr < logsz) {
     snprintf(log+logptr, logsz-logptr, "BOXQP: %s.\n"
              "iterations= %d,  factorizations= %d,  |grad|= %-12.6g, final value= %-12.6g\n",
              status_string[status+1], iter, nfactor, mju_sqrt(norm2), value);

@@ -17,85 +17,52 @@
 
 #include <filament/Engine.h>
 #include <filament/MaterialInstance.h>
-#include <filament/Texture.h>
-#include <math/vec2.h>
-#include <math/vec3.h>
-#include <math/vec4.h>
+#include <mujoco/mujoco.h>
+#include "experimental/filament/filament/texture.h"
 #include "experimental/filament/filament/object_manager.h"
 
 namespace mujoco {
 
-class Material {
- public:
-  // The different methods for rendering objects. Each mode uses a different
-  // material, but all materials "share" the same textures and parameters
-  // (unless specifically noted otherwise).
-  enum DrawMode {
-    kNormal,
-    kDepth,
-    kSegmentation,
-    kNumDrawModes,
-  };
-
-  // The textures that can be assigned to the drawable's material.
-  struct Textures {
-    const filament::Texture* color = nullptr;
-    const filament::Texture* normal = nullptr;
-    const filament::Texture* metallic = nullptr;
-    const filament::Texture* roughness = nullptr;
-    const filament::Texture* occlusion = nullptr;
-    const filament::Texture* orm = nullptr;
-    const filament::Texture* emissive = nullptr;
-  };
-
-  // The parameters that can be applied to the drawable's material.
-  struct Params {
-    filament::math::float4 color = {1, 1, 1, 1};
-    filament::math::float4 segmentation_color = {1, 1, 1, 1};
-    filament::math::float2 tex_repeat = {1, 1};
-    filament::math::float3 uv_scale = {1, 1, 1};
-    float specular = -1.0f;
-    float glossiness = -1.0f;
-    float metallic = -1.0f;
-    float roughness = -1.0f;
-    float emissive = -1.0f;
-    bool tex_uniform = false;
-  };
-
-  Material(ObjectManager* object_mgr);
-  ~Material() noexcept;
-
-  Material(const Material&) = delete;
-  Material& operator=(const Material&) = delete;
-
-  // Assigns a material to the draw mode.
-  void SetNormalMaterialType(ObjectManager::MaterialType material_type);
-
-  // Updates the material parameters of the drawable for rendering.
-  void UpdateParams(const Params& params);
-
-  // Updates the material textures of the drawable for rendering.
-  void UpdateTextures(const Textures& textures);
-
-  // Returns the material instance assigned to the draw mode.
-  filament::MaterialInstance* GetMaterialInstance(DrawMode mode) {
-    return instances_[mode];
-  }
-
-  // Returns the ObjectManager owning the Materials which are used to create
-  // the MaterialInstances.
-  ObjectManager* GetObjectManager() { return object_mgr_; }
-
- private:
-  // Updates the material instances based on the currently set parameters and
-  // textures.
-  void UpdateMaterialInstances();
-
-  ObjectManager* object_mgr_ = nullptr;
-  filament::MaterialInstance* instances_[kNumDrawModes] = {nullptr};
-  Params params_;
-  Textures textures_;
+// The textures that can be assigned to the drawable's material.
+struct mjrMaterialTextures {
+  const Texture* color;
+  const Texture* normal;
+  const Texture* metallic;
+  const Texture* roughness;
+  const Texture* occlusion;
+  const Texture* orm;
+  const Texture* emissive;
+  const Texture* reflection;
 };
+
+void mjr_defaultMaterialTextures(mjrMaterialTextures* textures);
+
+// The parameters that can be applied to the drawable's material.
+struct mjrMaterialParams {
+  float color[4];
+  float segmentation_color[4];
+  float tex_repeat[2];
+  float uv_scale[3];
+  float uv_offset[3];
+  float scissor[4];
+  float specular;
+  float glossiness;
+  float metallic;
+  float roughness;
+  float emissive;
+  float reflectance;
+  mjtByte tex_uniform;
+  mjtByte reflective;
+};
+
+void mjr_defaultMaterialParams(mjrMaterialParams* params);
+
+// Updates the material instances based on the currently set parameters and
+// textures.
+void UpdateMaterialInstance(filament::MaterialInstance* instance,
+                            const mjrMaterialParams& params,
+                            const mjrMaterialTextures& textures,
+                            ObjectManager* object_mgr);
 
 }  // namespace mujoco
 

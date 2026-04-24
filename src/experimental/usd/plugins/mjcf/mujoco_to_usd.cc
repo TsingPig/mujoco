@@ -649,7 +649,6 @@ class ModelWriter {
     };
 
     const std::vector<std::pair<pxr::TfToken, int>> enable_flags = {
-        {MjcPhysicsTokens->mjcFlagMulticcd, mjENBL_MULTICCD},
         {MjcPhysicsTokens->mjcFlagFwdinv, mjENBL_FWDINV},
         {MjcPhysicsTokens->mjcFlagEnergy, mjENBL_ENERGY},
         {MjcPhysicsTokens->mjcFlagOverride, mjENBL_OVERRIDE},
@@ -677,7 +676,8 @@ class ModelWriter {
         {MjcPhysicsTokens->mjcFlagEulerdamp, mjDSBL_EULERDAMP},
         {MjcPhysicsTokens->mjcFlagAutoreset, mjDSBL_AUTORESET},
         {MjcPhysicsTokens->mjcFlagNativeccd, mjDSBL_NATIVECCD},
-        {MjcPhysicsTokens->mjcFlagIsland, mjDSBL_ISLAND}};
+        {MjcPhysicsTokens->mjcFlagIsland, mjDSBL_ISLAND},
+        {MjcPhysicsTokens->mjcFlagMulticcd, mjDSBL_MULTICCD}};
     for (const auto &[token, flag] : disable_flags) {
       create_flag_attr(token, flag, false);
     }
@@ -2079,7 +2079,7 @@ class ModelWriter {
                                joint->solimp_friction + mjNIMP));
 
       WriteUniformAttribute(joint_spec, pxr::SdfValueTypeNames->Double,
-                            MjcPhysicsTokens->mjcStiffness, joint->stiffness);
+                            MjcPhysicsTokens->mjcStiffness, joint->stiffness[0]);
 
       WriteUniformAttribute(joint_spec, pxr::SdfValueTypeNames->Double,
                             MjcPhysicsTokens->mjcActuatorfrcrangeMin,
@@ -2116,7 +2116,7 @@ class ModelWriter {
                             MjcPhysicsTokens->mjcArmature, joint->armature);
 
       WriteUniformAttribute(joint_spec, pxr::SdfValueTypeNames->Double,
-                            MjcPhysicsTokens->mjcDamping, joint->damping);
+                            MjcPhysicsTokens->mjcDamping, joint->damping[0]);
 
       WriteUniformAttribute(joint_spec, pxr::SdfValueTypeNames->Double,
                             MjcPhysicsTokens->mjcFrictionloss,

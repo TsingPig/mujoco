@@ -1,4 +1,4 @@
-# Copyright 2025 DeepMind Technologies Limited
+# Copyright 2026 DeepMind Technologies Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,12 +16,29 @@
 DO NOT EDIT. This file is auto-generated.
 """
 import dataclasses
+import typing
 from typing import Tuple
 import jax
 from jax import tree_util
 from jax.interpreters import batching
 from mujoco.mjx._src import dataclasses as mjx_dataclasses
 import numpy as np
+if typing.TYPE_CHECKING:
+  GraphMode = int
+
+  @dataclasses.dataclass
+  class Callback:
+    pass
+
+else:
+  try:
+    from warp._src.jax_experimental.ffi import GraphMode
+    from mujoco.mjx.third_party.mujoco_warp._src import types as mjwp_types
+
+    Callback = mjwp_types.Callback
+  except ImportError:
+    GraphMode = int
+    Callback = None
 PyTreeNode = mjx_dataclasses.PyTreeNode
 
 @dataclasses.dataclass(frozen=True)
@@ -63,10 +80,10 @@ class BlockDim:
   energy_vel_kinetic: int
   euler_dense: int
   linesearch_iterative: int
-  mul_m_dense: int
+  qderiv_actuator_dense: int
   ray: int
   segmented_sort: int
-  tendon_velocity: int
+  solve_LD_sparse_fused: int
   update_gradient_JTDAJ_dense: int
   update_gradient_JTDAJ_sparse: int
   update_gradient_cholesky: int
@@ -84,7 +101,7 @@ class BlockDim:
 
 class StatisticWarp(PyTreeNode):
   """Derived fields from Statistic."""
-  meaninertia: float
+  meaninertia: jax.Array
 
 class OptionWarp(PyTreeNode):
   """Derived fields from Option."""
@@ -94,9 +111,8 @@ class OptionWarp(PyTreeNode):
   ccd_tolerance: jax.Array
   contact_sensor_maxmatch: int
   graph_conditional: bool
-  has_fluid: bool
+  graph_mode: GraphMode
   impratio_invsqrt: jax.Array
-  is_sparse: bool
   ls_parallel: bool
   ls_parallel_min_step: float
   run_collision_detection: bool
@@ -110,8 +126,12 @@ class ModelWarp(PyTreeNode):
   M_rownnz: np.ndarray
   actuator_trntype_body_adr: np.ndarray
   block_dim: BlockDim
+  body_branch_start: np.ndarray
+  body_branches: np.ndarray
   body_fluid_ellipsoid: np.ndarray
   body_tree: Tuple[np.ndarray, ...]
+  callback: Callback
+  cam_projection: np.ndarray
   collision_sensor_adr: np.ndarray
   dof_tri_col: np.ndarray
   dof_tri_row: np.ndarray
@@ -121,6 +141,10 @@ class ModelWarp(PyTreeNode):
   eq_ten_adr: np.ndarray
   eq_wld_adr: np.ndarray
   flex_bending: np.ndarray
+  flex_centered: np.ndarray
+  flex_conaffinity: np.ndarray
+  flex_condim: np.ndarray
+  flex_contype: np.ndarray
   flex_damping: np.ndarray
   flex_dim: np.ndarray
   flex_edge: np.ndarray
@@ -129,18 +153,30 @@ class ModelWarp(PyTreeNode):
   flex_edgenum: np.ndarray
   flex_elem: np.ndarray
   flex_elemadr: np.ndarray
+  flex_elemdataadr: np.ndarray
   flex_elemedge: np.ndarray
   flex_elemedgeadr: np.ndarray
   flex_elemnum: np.ndarray
+  flex_friction: np.ndarray
+  flex_margin: np.ndarray
+  flex_radius: np.ndarray
+  flex_shell: np.ndarray
+  flex_shelldataadr: np.ndarray
+  flex_shellnum: np.ndarray
   flex_stiffness: np.ndarray
-  flex_vertadr: np.ndarray
+  flex_vert: np.ndarray
   flex_vertbodyid: np.ndarray
-  flex_vertnum: np.ndarray
+  flex_vertflexid: np.ndarray
+  flexedge_J_colind: np.ndarray
+  flexedge_J_rowadr: np.ndarray
+  flexedge_J_rownnz: np.ndarray
   flexedge_invweight0: np.ndarray
   flexedge_length0: np.ndarray
   geom_pair_type_count: Tuple[int, ...]
   geom_plugin_index: np.ndarray
+  has_fluid: bool
   has_sdf_geom: bool
+  is_sparse: bool
   jnt_limited_ball_adr: np.ndarray
   jnt_limited_slide_hinge_adr: np.ndarray
   light_active: jax.Array
@@ -148,6 +184,7 @@ class ModelWarp(PyTreeNode):
   light_targetbodyid: np.ndarray
   mapM2M: np.ndarray
   mat_texrepeat: jax.Array
+  max_ten_J_rownnz: int
   mesh_polyadr: np.ndarray
   mesh_polymap: np.ndarray
   mesh_polymapadr: np.ndarray
@@ -158,12 +195,14 @@ class ModelWarp(PyTreeNode):
   mesh_polyvertadr: np.ndarray
   mesh_polyvertnum: np.ndarray
   mocap_bodyid: np.ndarray
+  nJfe: int
   nacttrnbody: int
-  nflex: int
+  nbranch: int
   nflexedge: int
   nflexelem: int
   nflexelemdata: int
   nflexelemedge: int
+  nflexshelldata: int
   nflexvert: int
   nmaxcondim: int
   nmaxmeshdeg: int
@@ -175,6 +214,7 @@ class ModelWarp(PyTreeNode):
   nsensorcollision: int
   nsensorcontact: int
   nsensortaxel: int
+  ntree: int
   nv_pad: int
   nxn_geom_pair: np.ndarray
   nxn_geom_pair_filtered: np.ndarray
@@ -185,12 +225,14 @@ class ModelWarp(PyTreeNode):
   oct_coeff: np.ndarray
   plugin: np.ndarray
   plugin_attr: np.ndarray
+  qLD_all_updates: np.ndarray
+  qLD_level_offsets: np.ndarray
   qLD_updates: Tuple[np.ndarray, ...]
   qM_fullm_i: np.ndarray
   qM_fullm_j: np.ndarray
-  qM_madr_ij: np.ndarray
-  qM_mulm_i: np.ndarray
-  qM_mulm_j: np.ndarray
+  qM_mulm_col: np.ndarray
+  qM_mulm_madr: np.ndarray
+  qM_mulm_rowadr: np.ndarray
   qM_tiles: Tuple[TileSet, ...]
   rangefinder_sensor_adr: np.ndarray
   sensor_acc_adr: np.ndarray
@@ -212,12 +254,18 @@ class ModelWarp(PyTreeNode):
   sensor_vel_adr: np.ndarray
   taxel_sensorid: np.ndarray
   taxel_vertadr: np.ndarray
+  ten_J_colind: np.ndarray
+  ten_J_rowadr: np.ndarray
+  ten_J_rownnz: np.ndarray
   ten_wrapadr_site: np.ndarray
   ten_wrapnum_site: np.ndarray
   tendon_geom_adr: np.ndarray
   tendon_jnt_adr: np.ndarray
   tendon_limited_adr: np.ndarray
   tendon_site_pair_adr: np.ndarray
+  tree_bodynum: np.ndarray
+  tree_dofadr: np.ndarray
+  tree_dofnum: np.ndarray
   wrap_geom_adr: np.ndarray
   wrap_jnt_adr: np.ndarray
   wrap_pulley_scale: np.ndarray
@@ -232,12 +280,10 @@ class DataWarp(PyTreeNode):
   cfrc_ext: jax.Array
   cfrc_int: jax.Array
   cinert: jax.Array
-  collision_pair: jax.Array
-  collision_pairid: jax.Array
-  collision_worldid: jax.Array
   contact__dim: jax.Array
   contact__dist: jax.Array
   contact__efc_address: jax.Array
+  contact__flex: jax.Array
   contact__frame: jax.Array
   contact__friction: jax.Array
   contact__geom: jax.Array
@@ -248,35 +294,21 @@ class DataWarp(PyTreeNode):
   contact__solref: jax.Array
   contact__solreffriction: jax.Array
   contact__type: jax.Array
+  contact__vert: jax.Array
   contact__worldid: jax.Array
   crb: jax.Array
   efc__D: jax.Array
   efc__J: jax.Array
-  efc__Jaref: jax.Array
+  efc__J_colind: jax.Array
+  efc__J_rowadr: jax.Array
+  efc__J_rownnz: jax.Array
   efc__Ma: jax.Array
-  efc__Mgrad: jax.Array
-  efc__alpha: jax.Array
   efc__aref: jax.Array
-  efc__beta: jax.Array
-  efc__cost: jax.Array
-  efc__done: jax.Array
   efc__force: jax.Array
   efc__frictionloss: jax.Array
-  efc__gauss: jax.Array
-  efc__grad: jax.Array
-  efc__grad_dot: jax.Array
   efc__id: jax.Array
-  efc__jv: jax.Array
   efc__margin: jax.Array
-  efc__mv: jax.Array
   efc__pos: jax.Array
-  efc__prev_Mgrad: jax.Array
-  efc__prev_cost: jax.Array
-  efc__prev_grad: jax.Array
-  efc__quad: jax.Array
-  efc__quad_gauss: jax.Array
-  efc__search: jax.Array
-  efc__search_dot: jax.Array
   efc__state: jax.Array
   efc__type: jax.Array
   efc__vel: jax.Array
@@ -287,20 +319,21 @@ class DataWarp(PyTreeNode):
   flexvert_xpos: jax.Array
   light_xdir: jax.Array
   light_xpos: jax.Array
+  moment_colind: jax.Array
+  moment_rowadr: jax.Array
+  moment_rownnz: jax.Array
+  naccdmax: int
   nacon: jax.Array
   naconmax: int
   ncollision: jax.Array
   ne: jax.Array
-  ne_connect: jax.Array
-  ne_flex: jax.Array
-  ne_jnt: jax.Array
-  ne_ten: jax.Array
-  ne_weld: jax.Array
   nefc: jax.Array
   nf: jax.Array
+  nisland: jax.Array
   njmax: int
+  njmax_nnz: int
+  njmax_pad: int
   nl: jax.Array
-  nsolving: jax.Array
   nworld: int
   qLD: jax.Array
   qLDiagInv: jax.Array
@@ -309,22 +342,20 @@ class DataWarp(PyTreeNode):
   qfrc_spring: jax.Array
   solver_niter: jax.Array
   subtree_angmom: jax.Array
-  subtree_bodyvel: jax.Array
   subtree_linvel: jax.Array
   ten_J: jax.Array
   ten_velocity: jax.Array
   ten_wrapadr: jax.Array
   ten_wrapnum: jax.Array
+  tree_island: jax.Array
   wrap_obj: jax.Array
   wrap_xpos: jax.Array
   shape = property(lambda self: self.cacc.shape)
 DATA_NON_VMAP = {
-    'collision_pair',
-    'collision_pairid',
-    'collision_worldid',
     'contact__dim',
     'contact__dist',
     'contact__efc_address',
+    'contact__flex',
     'contact__frame',
     'contact__friction',
     'contact__geom',
@@ -335,12 +366,15 @@ DATA_NON_VMAP = {
     'contact__solref',
     'contact__solreffriction',
     'contact__type',
+    'contact__vert',
     'contact__worldid',
+    'naccdmax',
     'nacon',
     'naconmax',
     'ncollision',
     'njmax',
-    'nsolving',
+    'njmax_nnz',
+    'njmax_pad',
     'nworld',
 }
 
@@ -374,7 +408,7 @@ _NDIM = {
         'act_dot': 2,
         'actuator_force': 2,
         'actuator_length': 2,
-        'actuator_moment': 3,
+        'actuator_moment': 2,
         'actuator_velocity': 2,
         'cacc': 3,
         'cam_xmat': 4,
@@ -384,12 +418,10 @@ _NDIM = {
         'cfrc_ext': 3,
         'cfrc_int': 3,
         'cinert': 3,
-        'collision_pair': 2,
-        'collision_pairid': 2,
-        'collision_worldid': 1,
         'contact__dim': 1,
         'contact__dist': 1,
         'contact__efc_address': 2,
+        'contact__flex': 2,
         'contact__frame': 3,
         'contact__friction': 2,
         'contact__geom': 2,
@@ -400,43 +432,29 @@ _NDIM = {
         'contact__solref': 2,
         'contact__solreffriction': 2,
         'contact__type': 1,
+        'contact__vert': 2,
         'contact__worldid': 1,
         'crb': 3,
         'ctrl': 2,
         'cvel': 3,
         'efc__D': 2,
         'efc__J': 3,
-        'efc__Jaref': 2,
+        'efc__J_colind': 3,
+        'efc__J_rowadr': 2,
+        'efc__J_rownnz': 2,
         'efc__Ma': 2,
-        'efc__Mgrad': 2,
-        'efc__alpha': 1,
         'efc__aref': 2,
-        'efc__beta': 1,
-        'efc__cost': 1,
-        'efc__done': 1,
         'efc__force': 2,
         'efc__frictionloss': 2,
-        'efc__gauss': 1,
-        'efc__grad': 2,
-        'efc__grad_dot': 1,
         'efc__id': 2,
-        'efc__jv': 2,
         'efc__margin': 2,
-        'efc__mv': 2,
         'efc__pos': 2,
-        'efc__prev_Mgrad': 2,
-        'efc__prev_cost': 1,
-        'efc__prev_grad': 2,
-        'efc__quad': 3,
-        'efc__quad_gauss': 2,
-        'efc__search': 2,
-        'efc__search_dot': 1,
         'efc__state': 2,
         'efc__type': 2,
         'efc__vel': 2,
         'energy': 2,
         'eq_active': 2,
-        'flexedge_J': 3,
+        'flexedge_J': 2,
         'flexedge_length': 2,
         'flexedge_velocity': 2,
         'flexvert_xpos': 3,
@@ -446,20 +464,21 @@ _NDIM = {
         'light_xpos': 3,
         'mocap_pos': 3,
         'mocap_quat': 3,
+        'moment_colind': 2,
+        'moment_rowadr': 2,
+        'moment_rownnz': 2,
+        'naccdmax': 0,
         'nacon': 1,
         'naconmax': 0,
         'ncollision': 1,
         'ne': 1,
-        'ne_connect': 1,
-        'ne_flex': 1,
-        'ne_jnt': 1,
-        'ne_ten': 1,
-        'ne_weld': 1,
         'nefc': 1,
         'nf': 1,
+        'nisland': 1,
         'njmax': 0,
+        'njmax_nnz': 0,
+        'njmax_pad': 0,
         'nl': 1,
-        'nsolving': 1,
         'nworld': 0,
         'qLD': 3,
         'qLDiagInv': 2,
@@ -485,15 +504,15 @@ _NDIM = {
         'site_xpos': 3,
         'solver_niter': 1,
         'subtree_angmom': 3,
-        'subtree_bodyvel': 3,
         'subtree_com': 3,
         'subtree_linvel': 3,
-        'ten_J': 3,
+        'ten_J': 2,
         'ten_length': 2,
         'ten_velocity': 2,
         'ten_wrapadr': 2,
         'ten_wrapnum': 2,
         'time': 1,
+        'tree_island': 2,
         'wrap_obj': 3,
         'wrap_xpos': 3,
         'xanchor': 3,
@@ -509,7 +528,7 @@ _NDIM = {
         'M_colind': 1,
         'M_rowadr': 1,
         'M_rownnz': 1,
-        'actuator_acc0': 1,
+        'actuator_acc0': 2,
         'actuator_actadr': 1,
         'actuator_actearly': 1,
         'actuator_actlimited': 1,
@@ -517,7 +536,7 @@ _NDIM = {
         'actuator_actrange': 3,
         'actuator_biasprm': 3,
         'actuator_biastype': 1,
-        'actuator_cranklength': 1,
+        'actuator_cranklength': 2,
         'actuator_ctrllimited': 1,
         'actuator_ctrlrange': 3,
         'actuator_dynprm': 3,
@@ -527,7 +546,7 @@ _NDIM = {
         'actuator_gainprm': 3,
         'actuator_gaintype': 1,
         'actuator_gear': 3,
-        'actuator_lengthrange': 2,
+        'actuator_lengthrange': 3,
         'actuator_trnid': 2,
         'actuator_trntype': 1,
         'actuator_trntype_body_adr': 1,
@@ -539,14 +558,16 @@ _NDIM = {
         'block_dim__energy_vel_kinetic': 0,
         'block_dim__euler_dense': 0,
         'block_dim__linesearch_iterative': 0,
-        'block_dim__mul_m_dense': 0,
+        'block_dim__qderiv_actuator_dense': 0,
         'block_dim__ray': 0,
         'block_dim__segmented_sort': 0,
-        'block_dim__tendon_velocity': 0,
+        'block_dim__solve_LD_sparse_fused': 0,
         'block_dim__update_gradient_JTDAJ_dense': 0,
         'block_dim__update_gradient_JTDAJ_sparse': 0,
         'block_dim__update_gradient_cholesky': 0,
         'block_dim__update_gradient_cholesky_blocked': 0,
+        'body_branch_start': 1,
+        'body_branches': 1,
         'body_conaffinity': 1,
         'body_contype': 1,
         'body_dofadr': 1,
@@ -569,15 +590,17 @@ _NDIM = {
         'body_rootid': 1,
         'body_subtreemass': 2,
         'body_tree': -1,
+        'body_treeid': 1,
         'body_weldid': 1,
         'cam_bodyid': 1,
-        'cam_fovy': 1,
-        'cam_intrinsic': 2,
+        'cam_fovy': 2,
+        'cam_intrinsic': 3,
         'cam_mat0': 4,
         'cam_mode': 1,
         'cam_pos': 3,
         'cam_pos0': 3,
         'cam_poscom0': 3,
+        'cam_projection': 1,
         'cam_quat': 3,
         'cam_resolution': 2,
         'cam_sensorsize': 2,
@@ -593,6 +616,7 @@ _NDIM = {
         'dof_parentid': 1,
         'dof_solimp': 3,
         'dof_solref': 3,
+        'dof_treeid': 1,
         'dof_tri_col': 1,
         'dof_tri_row': 1,
         'eq_active0': 1,
@@ -610,6 +634,10 @@ _NDIM = {
         'eq_wld_adr': 1,
         'exclude_signature': 1,
         'flex_bending': 2,
+        'flex_centered': 1,
+        'flex_conaffinity': 1,
+        'flex_condim': 1,
+        'flex_contype': 1,
         'flex_damping': 1,
         'flex_dim': 1,
         'flex_edge': 2,
@@ -618,13 +646,25 @@ _NDIM = {
         'flex_edgenum': 1,
         'flex_elem': 1,
         'flex_elemadr': 1,
+        'flex_elemdataadr': 1,
         'flex_elemedge': 1,
         'flex_elemedgeadr': 1,
         'flex_elemnum': 1,
+        'flex_friction': 2,
+        'flex_margin': 1,
+        'flex_radius': 1,
+        'flex_shell': 1,
+        'flex_shelldataadr': 1,
+        'flex_shellnum': 1,
         'flex_stiffness': 2,
+        'flex_vert': 2,
         'flex_vertadr': 1,
         'flex_vertbodyid': 1,
+        'flex_vertflexid': 1,
         'flex_vertnum': 1,
+        'flexedge_J_colind': 1,
+        'flexedge_J_rowadr': 1,
+        'flexedge_J_rownnz': 1,
         'flexedge_invweight0': 1,
         'flexedge_length0': 1,
         'geom_aabb': 4,
@@ -632,7 +672,7 @@ _NDIM = {
         'geom_conaffinity': 1,
         'geom_condim': 1,
         'geom_contype': 1,
-        'geom_dataid': 1,
+        'geom_dataid': 2,
         'geom_fluid': 2,
         'geom_friction': 3,
         'geom_gap': 2,
@@ -651,12 +691,14 @@ _NDIM = {
         'geom_solmix': 2,
         'geom_solref': 3,
         'geom_type': 1,
+        'has_fluid': 0,
         'has_sdf_geom': 0,
         'hfield_adr': 1,
         'hfield_data': 1,
         'hfield_ncol': 1,
         'hfield_nrow': 1,
         'hfield_size': 2,
+        'is_sparse': 0,
         'jnt_actfrclimited': 1,
         'jnt_actfrcrange': 3,
         'jnt_actgravcomp': 1,
@@ -687,14 +729,17 @@ _NDIM = {
         'light_type': 2,
         'mapM2M': 1,
         'mat_rgba': 3,
-        'mat_texid': 2,
+        'mat_texid': 3,
         'mat_texrepeat': 3,
+        'max_ten_J_rownnz': 0,
         'mesh_face': 2,
         'mesh_faceadr': 1,
         'mesh_graph': 1,
         'mesh_graphadr': 1,
         'mesh_normal': 2,
         'mesh_normaladr': 1,
+        'mesh_normalnum': 1,
+        'mesh_octadr': 1,
         'mesh_polyadr': 1,
         'mesh_polymap': 1,
         'mesh_polymapadr': 1,
@@ -710,10 +755,14 @@ _NDIM = {
         'mesh_vertnum': 1,
         'mocap_bodyid': 1,
         'nC': 0,
+        'nJfe': 0,
+        'nJmom': 0,
+        'nJten': 0,
         'nM': 0,
         'na': 0,
         'nacttrnbody': 0,
         'nbody': 0,
+        'nbranch': 0,
         'ncam': 0,
         'neq': 0,
         'nexclude': 0,
@@ -722,6 +771,7 @@ _NDIM = {
         'nflexelem': 0,
         'nflexelemdata': 0,
         'nflexelemedge': 0,
+        'nflexshelldata': 0,
         'nflexvert': 0,
         'ngeom': 0,
         'ngravcomp': 0,
@@ -755,6 +805,7 @@ _NDIM = {
         'nsensortaxel': 0,
         'nsite': 0,
         'ntendon': 0,
+        'ntree': 0,
         'nu': 0,
         'nv': 0,
         'nv_pad': 0,
@@ -775,10 +826,8 @@ _NDIM = {
         'opt__enableflags': 0,
         'opt__graph_conditional': 0,
         'opt__gravity': 2,
-        'opt__has_fluid': 0,
         'opt__impratio_invsqrt': 1,
         'opt__integrator': 0,
-        'opt__is_sparse': 0,
         'opt__iterations': 0,
         'opt__ls_iterations': 0,
         'opt__ls_parallel': 0,
@@ -804,12 +853,14 @@ _NDIM = {
         'pair_solreffriction': 3,
         'plugin': 1,
         'plugin_attr': 2,
+        'qLD_all_updates': 2,
+        'qLD_level_offsets': 1,
         'qLD_updates': -1,
         'qM_fullm_i': 1,
         'qM_fullm_j': 1,
-        'qM_madr_ij': 1,
-        'qM_mulm_i': 1,
-        'qM_mulm_j': 1,
+        'qM_mulm_col': 1,
+        'qM_mulm_madr': 1,
+        'qM_mulm_rowadr': 1,
         'qM_tiles': -1,
         'qpos0': 2,
         'qpos_spring': 2,
@@ -846,9 +897,12 @@ _NDIM = {
         'site_quat': 3,
         'site_size': 2,
         'site_type': 1,
-        'stat__meaninertia': 0,
+        'stat__meaninertia': 1,
         'taxel_sensorid': 1,
         'taxel_vertadr': 1,
+        'ten_J_colind': 1,
+        'ten_J_rowadr': 1,
+        'ten_J_rownnz': 1,
         'ten_wrapadr_site': 1,
         'ten_wrapnum_site': 1,
         'tendon_actfrclimited': 1,
@@ -873,6 +927,9 @@ _NDIM = {
         'tendon_solref_fri': 3,
         'tendon_solref_lim': 3,
         'tendon_stiffness': 2,
+        'tree_bodynum': 1,
+        'tree_dofadr': 1,
+        'tree_dofnum': 1,
         'wrap_geom_adr': 1,
         'wrap_jnt_adr': 1,
         'wrap_objid': 1,
@@ -892,10 +949,8 @@ _NDIM = {
         'enableflags': 0,
         'graph_conditional': 0,
         'gravity': 2,
-        'has_fluid': 0,
         'impratio_invsqrt': 1,
         'integrator': 0,
-        'is_sparse': 0,
         'iterations': 0,
         'ls_iterations': 0,
         'ls_parallel': 0,
@@ -911,7 +966,7 @@ _NDIM = {
         'viscosity': 1,
         'wind': 2,
     },
-    'Statistic': {'meaninertia': 0},
+    'Statistic': {'meaninertia': 1},
 }
 _BATCH_DIM = {
     'Data': {
@@ -929,12 +984,10 @@ _BATCH_DIM = {
         'cfrc_ext': True,
         'cfrc_int': True,
         'cinert': True,
-        'collision_pair': False,
-        'collision_pairid': False,
-        'collision_worldid': False,
         'contact__dim': False,
         'contact__dist': False,
         'contact__efc_address': False,
+        'contact__flex': False,
         'contact__frame': False,
         'contact__friction': False,
         'contact__geom': False,
@@ -945,37 +998,23 @@ _BATCH_DIM = {
         'contact__solref': False,
         'contact__solreffriction': False,
         'contact__type': False,
+        'contact__vert': False,
         'contact__worldid': False,
         'crb': True,
         'ctrl': True,
         'cvel': True,
         'efc__D': True,
         'efc__J': True,
-        'efc__Jaref': True,
+        'efc__J_colind': True,
+        'efc__J_rowadr': True,
+        'efc__J_rownnz': True,
         'efc__Ma': True,
-        'efc__Mgrad': True,
-        'efc__alpha': True,
         'efc__aref': True,
-        'efc__beta': True,
-        'efc__cost': True,
-        'efc__done': True,
         'efc__force': True,
         'efc__frictionloss': True,
-        'efc__gauss': True,
-        'efc__grad': True,
-        'efc__grad_dot': True,
         'efc__id': True,
-        'efc__jv': True,
         'efc__margin': True,
-        'efc__mv': True,
         'efc__pos': True,
-        'efc__prev_Mgrad': True,
-        'efc__prev_cost': True,
-        'efc__prev_grad': True,
-        'efc__quad': True,
-        'efc__quad_gauss': True,
-        'efc__search': True,
-        'efc__search_dot': True,
         'efc__state': True,
         'efc__type': True,
         'efc__vel': True,
@@ -991,20 +1030,21 @@ _BATCH_DIM = {
         'light_xpos': True,
         'mocap_pos': True,
         'mocap_quat': True,
+        'moment_colind': True,
+        'moment_rowadr': True,
+        'moment_rownnz': True,
+        'naccdmax': False,
         'nacon': False,
         'naconmax': False,
         'ncollision': False,
         'ne': True,
-        'ne_connect': True,
-        'ne_flex': True,
-        'ne_jnt': True,
-        'ne_ten': True,
-        'ne_weld': True,
         'nefc': True,
         'nf': True,
+        'nisland': True,
         'njmax': False,
+        'njmax_nnz': False,
+        'njmax_pad': False,
         'nl': True,
-        'nsolving': False,
         'nworld': False,
         'qLD': True,
         'qLDiagInv': True,
@@ -1030,7 +1070,6 @@ _BATCH_DIM = {
         'site_xpos': True,
         'solver_niter': True,
         'subtree_angmom': True,
-        'subtree_bodyvel': True,
         'subtree_com': True,
         'subtree_linvel': True,
         'ten_J': True,
@@ -1039,6 +1078,7 @@ _BATCH_DIM = {
         'ten_wrapadr': True,
         'ten_wrapnum': True,
         'time': True,
+        'tree_island': True,
         'wrap_obj': True,
         'wrap_xpos': True,
         'xanchor': True,
@@ -1054,7 +1094,7 @@ _BATCH_DIM = {
         'M_colind': False,
         'M_rowadr': False,
         'M_rownnz': False,
-        'actuator_acc0': False,
+        'actuator_acc0': True,
         'actuator_actadr': False,
         'actuator_actearly': False,
         'actuator_actlimited': False,
@@ -1062,7 +1102,7 @@ _BATCH_DIM = {
         'actuator_actrange': True,
         'actuator_biasprm': True,
         'actuator_biastype': False,
-        'actuator_cranklength': False,
+        'actuator_cranklength': True,
         'actuator_ctrllimited': False,
         'actuator_ctrlrange': True,
         'actuator_dynprm': True,
@@ -1072,7 +1112,7 @@ _BATCH_DIM = {
         'actuator_gainprm': True,
         'actuator_gaintype': False,
         'actuator_gear': True,
-        'actuator_lengthrange': False,
+        'actuator_lengthrange': True,
         'actuator_trnid': False,
         'actuator_trntype': False,
         'actuator_trntype_body_adr': False,
@@ -1084,14 +1124,16 @@ _BATCH_DIM = {
         'block_dim__energy_vel_kinetic': False,
         'block_dim__euler_dense': False,
         'block_dim__linesearch_iterative': False,
-        'block_dim__mul_m_dense': False,
+        'block_dim__qderiv_actuator_dense': False,
         'block_dim__ray': False,
         'block_dim__segmented_sort': False,
-        'block_dim__tendon_velocity': False,
+        'block_dim__solve_LD_sparse_fused': False,
         'block_dim__update_gradient_JTDAJ_dense': False,
         'block_dim__update_gradient_JTDAJ_sparse': False,
         'block_dim__update_gradient_cholesky': False,
         'block_dim__update_gradient_cholesky_blocked': False,
+        'body_branch_start': False,
+        'body_branches': False,
         'body_conaffinity': False,
         'body_contype': False,
         'body_dofadr': False,
@@ -1114,15 +1156,17 @@ _BATCH_DIM = {
         'body_rootid': False,
         'body_subtreemass': True,
         'body_tree': False,
+        'body_treeid': False,
         'body_weldid': False,
         'cam_bodyid': False,
-        'cam_fovy': False,
-        'cam_intrinsic': False,
+        'cam_fovy': True,
+        'cam_intrinsic': True,
         'cam_mat0': True,
         'cam_mode': False,
         'cam_pos': True,
         'cam_pos0': True,
         'cam_poscom0': True,
+        'cam_projection': False,
         'cam_quat': True,
         'cam_resolution': False,
         'cam_sensorsize': False,
@@ -1138,6 +1182,7 @@ _BATCH_DIM = {
         'dof_parentid': False,
         'dof_solimp': True,
         'dof_solref': True,
+        'dof_treeid': False,
         'dof_tri_col': False,
         'dof_tri_row': False,
         'eq_active0': False,
@@ -1155,6 +1200,10 @@ _BATCH_DIM = {
         'eq_wld_adr': False,
         'exclude_signature': False,
         'flex_bending': False,
+        'flex_centered': False,
+        'flex_conaffinity': False,
+        'flex_condim': False,
+        'flex_contype': False,
         'flex_damping': False,
         'flex_dim': False,
         'flex_edge': False,
@@ -1163,13 +1212,25 @@ _BATCH_DIM = {
         'flex_edgenum': False,
         'flex_elem': False,
         'flex_elemadr': False,
+        'flex_elemdataadr': False,
         'flex_elemedge': False,
         'flex_elemedgeadr': False,
         'flex_elemnum': False,
+        'flex_friction': False,
+        'flex_margin': False,
+        'flex_radius': False,
+        'flex_shell': False,
+        'flex_shelldataadr': False,
+        'flex_shellnum': False,
         'flex_stiffness': False,
+        'flex_vert': False,
         'flex_vertadr': False,
         'flex_vertbodyid': False,
+        'flex_vertflexid': False,
         'flex_vertnum': False,
+        'flexedge_J_colind': False,
+        'flexedge_J_rowadr': False,
+        'flexedge_J_rownnz': False,
         'flexedge_invweight0': False,
         'flexedge_length0': False,
         'geom_aabb': True,
@@ -1177,7 +1238,7 @@ _BATCH_DIM = {
         'geom_conaffinity': False,
         'geom_condim': False,
         'geom_contype': False,
-        'geom_dataid': False,
+        'geom_dataid': True,
         'geom_fluid': False,
         'geom_friction': True,
         'geom_gap': True,
@@ -1196,12 +1257,14 @@ _BATCH_DIM = {
         'geom_solmix': True,
         'geom_solref': True,
         'geom_type': False,
+        'has_fluid': False,
         'has_sdf_geom': False,
         'hfield_adr': False,
         'hfield_data': False,
         'hfield_ncol': False,
         'hfield_nrow': False,
         'hfield_size': False,
+        'is_sparse': False,
         'jnt_actfrclimited': False,
         'jnt_actfrcrange': True,
         'jnt_actgravcomp': False,
@@ -1232,14 +1295,17 @@ _BATCH_DIM = {
         'light_type': True,
         'mapM2M': False,
         'mat_rgba': True,
-        'mat_texid': False,
+        'mat_texid': True,
         'mat_texrepeat': True,
+        'max_ten_J_rownnz': False,
         'mesh_face': False,
         'mesh_faceadr': False,
         'mesh_graph': False,
         'mesh_graphadr': False,
         'mesh_normal': False,
         'mesh_normaladr': False,
+        'mesh_normalnum': False,
+        'mesh_octadr': False,
         'mesh_polyadr': False,
         'mesh_polymap': False,
         'mesh_polymapadr': False,
@@ -1255,10 +1321,14 @@ _BATCH_DIM = {
         'mesh_vertnum': False,
         'mocap_bodyid': False,
         'nC': False,
+        'nJfe': False,
+        'nJmom': False,
+        'nJten': False,
         'nM': False,
         'na': False,
         'nacttrnbody': False,
         'nbody': False,
+        'nbranch': False,
         'ncam': False,
         'neq': False,
         'nexclude': False,
@@ -1267,6 +1337,7 @@ _BATCH_DIM = {
         'nflexelem': False,
         'nflexelemdata': False,
         'nflexelemedge': False,
+        'nflexshelldata': False,
         'nflexvert': False,
         'ngeom': False,
         'ngravcomp': False,
@@ -1300,6 +1371,7 @@ _BATCH_DIM = {
         'nsensortaxel': False,
         'nsite': False,
         'ntendon': False,
+        'ntree': False,
         'nu': False,
         'nv': False,
         'nv_pad': False,
@@ -1320,10 +1392,8 @@ _BATCH_DIM = {
         'opt__enableflags': False,
         'opt__graph_conditional': False,
         'opt__gravity': True,
-        'opt__has_fluid': False,
         'opt__impratio_invsqrt': True,
         'opt__integrator': False,
-        'opt__is_sparse': False,
         'opt__iterations': False,
         'opt__ls_iterations': False,
         'opt__ls_parallel': False,
@@ -1349,12 +1419,14 @@ _BATCH_DIM = {
         'pair_solreffriction': True,
         'plugin': False,
         'plugin_attr': False,
+        'qLD_all_updates': False,
+        'qLD_level_offsets': False,
         'qLD_updates': False,
         'qM_fullm_i': False,
         'qM_fullm_j': False,
-        'qM_madr_ij': False,
-        'qM_mulm_i': False,
-        'qM_mulm_j': False,
+        'qM_mulm_col': False,
+        'qM_mulm_madr': False,
+        'qM_mulm_rowadr': False,
         'qM_tiles': False,
         'qpos0': True,
         'qpos_spring': True,
@@ -1391,9 +1463,12 @@ _BATCH_DIM = {
         'site_quat': True,
         'site_size': False,
         'site_type': False,
-        'stat__meaninertia': False,
+        'stat__meaninertia': True,
         'taxel_sensorid': False,
         'taxel_vertadr': False,
+        'ten_J_colind': False,
+        'ten_J_rowadr': False,
+        'ten_J_rownnz': False,
         'ten_wrapadr_site': False,
         'ten_wrapnum_site': False,
         'tendon_actfrclimited': False,
@@ -1418,6 +1493,9 @@ _BATCH_DIM = {
         'tendon_solref_fri': True,
         'tendon_solref_lim': True,
         'tendon_stiffness': True,
+        'tree_bodynum': False,
+        'tree_dofadr': False,
+        'tree_dofnum': False,
         'wrap_geom_adr': False,
         'wrap_jnt_adr': False,
         'wrap_objid': False,
@@ -1437,10 +1515,8 @@ _BATCH_DIM = {
         'enableflags': False,
         'graph_conditional': False,
         'gravity': True,
-        'has_fluid': False,
         'impratio_invsqrt': True,
         'integrator': False,
-        'is_sparse': False,
         'iterations': False,
         'ls_iterations': False,
         'ls_parallel': False,
@@ -1456,5 +1532,5 @@ _BATCH_DIM = {
         'viscosity': True,
         'wind': True,
     },
-    'Statistic': {'meaninertia': False},
+    'Statistic': {'meaninertia': True},
 }

@@ -34,12 +34,12 @@ wp.set_module_options({"enable_backward": False})
 @wp.kernel
 def _qfrc_eulerdamp(
   # Model:
-  opt_timestep: wp.array(dtype=float),
-  dof_damping: wp.array2d(dtype=float),
+  opt_timestep: wp.array[float],
+  dof_damping: wp.array2d[float],
   # Data in:
-  qacc_in: wp.array2d(dtype=float),
+  qacc_in: wp.array2d[float],
   # Out:
-  qfrc_out: wp.array2d(dtype=float),
+  qfrc_out: wp.array2d[float],
 ):
   worldid, dofid = wp.tid()
   timestep = opt_timestep[worldid % opt_timestep.shape[0]]
@@ -49,13 +49,13 @@ def _qfrc_eulerdamp(
 @wp.kernel
 def _qfrc_inverse(
   # Data in:
-  qfrc_bias_in: wp.array2d(dtype=float),
-  qfrc_passive_in: wp.array2d(dtype=float),
-  qfrc_constraint_in: wp.array2d(dtype=float),
+  qfrc_bias_in: wp.array2d[float],
+  qfrc_passive_in: wp.array2d[float],
+  qfrc_constraint_in: wp.array2d[float],
   # In:
-  Ma: wp.array2d(dtype=float),
+  Ma: wp.array2d[float],
   # Data out:
-  qfrc_inverse_out: wp.array2d(dtype=float),
+  qfrc_inverse_out: wp.array2d[float],
 ):
   worldid, dofid = wp.tid()
 
@@ -67,7 +67,7 @@ def _qfrc_inverse(
   qfrc_inverse_out[worldid, dofid] = qfrc_inverse
 
 
-def discrete_acc(m: Model, d: Data, qacc: wp.array2d(dtype=float)):
+def discrete_acc(m: Model, d: Data, qacc: wp.array2d[float]):
   """Convert discrete-time qacc to continuous-time qacc.
 
   Args:
@@ -99,7 +99,7 @@ def discrete_acc(m: Model, d: Data, qacc: wp.array2d(dtype=float)):
       outputs=[qfrc],
     )
   elif m.opt.integrator == IntegratorType.IMPLICITFAST:
-    if m.opt.is_sparse:
+    if m.is_sparse:
       qDeriv = wp.empty((d.nworld, 1, m.nM), dtype=float)
     else:
       qDeriv = wp.empty((d.nworld, m.nv, m.nv), dtype=float)
@@ -120,10 +120,8 @@ def inv_constraint(m: Model, d: Data):
     d.qfrc_constraint.zero_()
     return
 
-  # update
-  h = wp.empty((d.nworld, 0, 0), dtype=float)  # not used
-  hfactor = wp.empty((d.nworld, 0, 0), dtype=float)  # not used
-  solver.create_context(m, d, h, hfactor, grad=False)
+  ctx = solver.create_inverse_context(m, d)
+  solver.init_context(m, d, ctx, grad=False)
 
 
 def inverse(m: Model, d: Data):

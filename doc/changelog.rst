@@ -5,54 +5,285 @@ Changelog
 Upcoming version (not yet released)
 -----------------------------------
 
-.. admonition:: Breaking API changes
+General
+^^^^^^^
+- Added new :ref:`mj_maxContact<mj_maxContact>` function to get the maximum number of possible contacts returned by
+  two geoms.
+- Added ``mj_containsBufferVFS`` and ``mj_containsFileVFS`` to check for existence of buffers and files in VFS.
+- Added :ref:`multi-cell support<body-flexcomp-cellnum>` for trilinear and quadratic flexes. Note that the implicit
+  integrator uses a dense solver for the flex degrees of freedom, which can be slow for multi-cell flexes.
+- Refactored ``flexstrain`` equality constraints to be instantiated per cell instead of per flex object, reducing the
+  number of degrees of freedom per constraint row. The equality can be associated with a specific cell with the new
+  attribute ":ref:`cell <equality-flexstrain-cell>`
+
+  .. admonition:: Breaking API changes
    :class: attention
 
-   - The ``mjModel.cam_orthographic`` field has been renamed to ``cam_projection``, with the semantic of a new enum type
-     :ref:`mjtProjection`. This will allow for more projection types in the future like fisheye cameras.
-     Relatedly, the ``camera/orthographic`` MJCF attribute for cameras has been renamed to
-     :ref:`camera/projection<body-camera-projection>` and now accepts the values ``orthographic`` and ``perspective``.
+   - The feature :ref:`multiccd<coMultiCCD>` is now enabled by default. This feature has little performance overhead
+     and gives better contact behavior for stability.
 
-     **Migration:** Replace ``orthographic = "false/true"`` with ``projection="perspective/orthographic"``,
-     respectively.
+     **Migration:** The flag :ref:`multiccd<option-flag-multiccd>` must be explicitly disabled.
+
+Bug fixes
+^^^^^^^^^
+
+- Asset paths in attached child specs are now resolved relative to the model file directory of the child spec, rather
+  than the parent spec. This prevents the origin of the parent spec to affect the resolution of asset paths in the child
+  spec.
+
+Version 3.7.0 (April 14, 2026)
+------------------------------
 
 General
 ^^^^^^^
+
+1. Added the :ref:`dcmotor<actuator-dcmotor>` actuator for modeling DC motors. Supports optional
+   electrical dynamics (inductance), cogging torque, thermal resistance variation, and LuGre friction. See the
+   `technical note <_static/dcmotor.pdf>`__ for more details.
+2. Actuators with joint or tendon transmissions can now contribute
+   :ref:`damping<actuator-general-damping>` and :ref:`armature<actuator-general-armature>` to their transmission target.
+   These are applied during the passive force and inertia computations, respectively, and are scaled by gear\ :sup:`2`
+   ("reflected" damping/inertia).
+
+.. youtube:: aKa3ZlEF9_Y
+   :align: right
+   :width: 35%
+
+3. Stiffness in :ref:`joints<body-joint-stiffness>` and :ref:`tendons<tendon-spatial-stiffness>` and damping in
+   :ref:`joints<body-joint-damping>` and :ref:`tendons<tendon-spatial-damping>` now support nonlinear polynomial
+   :ref:`force profiles<gePolynomial>`. New ``mjModel`` arrays (``jnt_stiffnesspoly``, ``tendon_stiffnesspoly``,
+   ``dof_dampingpoly``, ``tendon_dampingpoly``) hold higher-order coefficients. The existing scalar arrays
+   (``jnt_stiffness``, ``dof_damping``, etc.) continue to hold the linear coefficient and are unchanged.
+   The polynomial order is defined by the new constant :ref:`mjNPOLY<glNumericSizes>`. A future breaking C-API change
+   may unify the linear and higher-order coefficients into a single array.
+4. Added :ref:`midpoint integration<geMidpoint>` for standalone free bodies in ``implicit`` and ``implicitfast``
+   :ref:`integrators<geIntegrators>`. This applies the implicit midpoint rule to the rotational dynamics of free bodies
+   with no children, conserving kinetic energy to machine precision in the absence of external torques. The
+   :ref:`invdiscrete<option-flag-invdiscrete>` flag now also disables midpoint integration, providing an opt-out
+   mechanism.
+5. Added the centripetal/Coriolis acceleration term :math:`\dot{J}v` to the constraint solver bias for
+   :ref:`connect<equality-connect>` and :ref:`weld<equality-weld>` equality constaints. This significantly improves the
+   stability of constrained mechanisms like four-bar linkages. See :ref:`Dual problem<soDual>` for details.
+
+6. Introduced :ref:`mjpEncoder`, the counterpart to :ref:`mjpDecoder` for encoding of :ref:`mjSpec` and :ref:`mjModel`
+   into :ref:`mjResource`.
+
+7. Added :ref:`mj_encode`, :ref:`mjp_registerEncoder`, :ref:`mjp_defaultEncoder`, and :ref:`mjp_findEncoder`.
+
+.. admonition:: Breaking API changes
+   :class: attention
+
+   8. The ``mjs`` layer fields ``stiffness`` and ``damping`` in :ref:`mjsJoint` and :ref:`mjsTendon` have
+      been widened from ``mjtNum`` scalars to ``mjtNum[mjNPOLY+1]`` arrays. The first element is the linear coefficient
+      (previously the scalar), and subsequent elements are the higher-order :ref:`polynomial<gePolynomial>` coefficients.
+
+      **Migration:** Replace assignments like ``joint.stiffness = val`` with ``joint.stiffness[0] = val``.
+   9. ``.obj`` and ``.stl`` decoders are now included as source when building MuJoCo with CMake. This fixes the
+      behaviour from the previous release where it required downstream code to load these plugins explicitly.
+
+   10. The ``vertcollide`` field in :ref:`mjsFlex` has been removed. It is no longer required since
+       :doc:`MuJoCo Warp <mjwarp/index>` supports native flex collisions.
+
+   11. :ref:`mjPLUGIN_LIB_INIT` macro now requires a name argument to avoid initialization function name collisions.
+       When building with MSVC, we now use the C runtime initialization section to initialize plugins instead of
+       ``DllMain``. See :ref:`plugin registration<exRegistration>` for more details.
+
+   12. The :ref:`mjtWarning` enum value ``mjWARN_VGEOMFULL`` is removed. Exhaustion of visual geoms is now handled
+       internally by the :ref:`mjvScene`.
+   13. URDF parsing no longer hardcodes :ref:`strippath<compiler-strippath>` to "true". The setting is now respected and
+       the default is "false". Setting this is attribute is now the responsibility of the user.
+
+       **Migration:** Set :ref:`strippath<compiler-strippath>` to "true" in MJCF or programmatically using
+
+       .. code-block:: python
+
+         spec = mujoco.MjSpec.from_file("path/to/model.urdf")
+         spec.compiler.strippath = True
+
+
+Bug fixes
+^^^^^^^^^
+
+14. The compiler now correctly accounts for negative scaling when loading user specified mesh data.
+
+Version 3.6.0 (March 10, 2026)
+------------------------------
+
+General
+^^^^^^^
+
+.. admonition:: Breaking API changes
+   :class: attention
+
+   1. The tendon Jacobian ``ten_J`` is now always sparse. The fields  ``ten_J_rownnz``, ``ten_J_rowadr``, and
+      ``ten_J_colind`` have been moved from :ref:`mjData` to :ref:`mjModel` and are no longer computed at run time by
+      ``mj_tendon`` but at compile time.
+
+2. Added :ref:`mjs_getCompiler` C API function and a ``compiler`` read-only property to all Python spec element types.
+   This allows querying the compiler settings (e.g., ``meshdir``) from any element, with the correct originating spec's
+   compiler preserved after attachment.
+3. Added a new ``strain`` :ref:`equality constraint<flexcomp-edge-equality>` type for trilinear and quadratic
+   :ref:`dofs<body-flexcomp-dof>`.
+4. Flexes now support collisions with SDF geoms.
+5. Improved memory requirements for ``ten_J`` and ``ten_J_colind`` by reducing the upper bound for the number of
+   non-zeros ``nJten``.
+6. Improved memory requirements for ``actuator_moment`` and ``moment_colind`` by reducing the upper bound for the number
+   of non-zeros ``nJmom``.
+
+MJX
+^^^
+
+7. Add batch rendering support for MJX-Warp. See the :ref:`MJX-Warp batch rendering<MjxWarpBatchRendering>` section for
+   details.
+
+Bug fixes
+^^^^^^^^^
+
+8. Fixed a bug where :ref:`mjs_attach` silently dropped spatial tendons with wrapping geometries that had no
+   ``sidesite`` attribute (:issue:`3119`, reported by :github:user:`tomstewart89`).
+
+Version 3.5.0 (February 12, 2026)
+---------------------------------
+
+Significant new features
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. :doc:`MuJoCo Warp <mjwarp/index>` is now officially released.
+2. Added a new **System Identification** toolbox (Python), see
+   `README <https://github.com/google-deepmind/mujoco/blob/main/python/mujoco/sysid/README.md>`__ for details.
+   |br| A Colab notebook demonstrating the toolbox is available here: |sysid_colab|
+   |br| Contribution by :github:user:`kevinzakka`, :github:user:`aftersomemath`, :github:user:`jonathanembleyriches`,
+   :github:user:`qiayuanl`, :github:user:`spjardim` and :github:user:`gizemozd`.
+
+.. |sysid_colab| image:: https://colab.research.google.com/assets/colab-badge.png
+                 :target: https://colab.research.google.com/github/google-deepmind/mujoco/blob/main/python/mujoco/sysid/sysid.ipynb
+
+
+3. Actuators and sensors now support arbitrary delays via history buffers, and sensor values can be computed at
+   intervals larger than the simulation timestep. Using a delay or interval introduces a new ``mjData.history`` variable
+   to the :ref:`Physics state<siPhysicsState>`. See :ref:`Delays<CDelay>` for details.
+
+.. image:: images/changelog/poncho.png
+   :width: 45%
+   :align: right
+   :target: https://github.com/google-deepmind/mujoco/blob/main/model/flex/poncho.xml
+
+4. Added new :ref:`flexvert<equality-flexvert>` equality constraints that enable cloth simulations with coarser meshes.
+   This adds a new attribute value ``vert`` to flexcomp edge :ref:`equality<flexcomp-edge-equality>` and the new
+   equality type :ref:`flexvert<equality-flexvert>`. Uses the method described in
+   `Chen, Kry and Vouga, 2019 <https://arxiv.org/abs/1911.05204>`__.
+5. Added implicit integration support for deformable objects (flex) in ``implicit`` and ``implicitfast``
+   :ref:`integrators<geIntegration>`. This method extracts the flex degrees of freedom and solves them as a dense block,
+   enabling increased stability for stiff flex objects without reducing the timestep. It is compatible with the
+   ``trilinear`` and ``quadratic`` :ref:`dof<body-flexcomp-dof>` types.
 
 .. image:: images/XMLreference/rfcamera.png
    :width: 45%
    :align: right
    :target: https://github.com/google-deepmind/mujoco/blob/main/test/engine/testdata/sensor/rfcamera.xml
 
-- Camera frustum visualization is now triggered by setting :ref:`resolution<body-camera-resolution>` to values larger
-  than 1. Relatedly, frustum visualization also works for :ref:`orthographic<body-camera-projection>` cameras.
-- Rangefinder sensors can now be attached to a camera using the :ref:`ragefinder/camera<sensor-rangefinder-camera>`
-  attribute. In this case, the sensor will cast multiple ray, one for each pixel.
-- Rangefinder sensors can now now report various kinds of information besides ray distances, including surface normals.
-  See :ref:`rangefinder<sensor-rangefinder>` for details.
-- Non-breaking ABI changes:
+6. Rangefinder sensors can now be attached to a camera using the :ref:`rangefinder/camera<sensor-rangefinder-camera>`
+   attribute. In this case, the sensor respects the :ref:`camera/resolution<body-camera-resolution>` attribute and casts
+   multiple rays, one for each pixel.
+7. :ref:`Rangefinders<sensor-rangefinder>` can now report various kinds of information besides ray distances,
+   including surface normals and intersection points.
 
-  - The type of the ``sig`` (signature) argument of :ref:`mj_stateSize` and related functions has been changed from
-    ``unsigned int`` to ``int``. Before this change, invalid negative arguments passed to this function would result in
-    a silent implicit cast, now negativity will trigger an error.
-  - Added a :ref:`depth<mjtRndFlag>` rendering flag.
+.. container:: custom-clear
+
+   .. raw:: html
+
+      <div style="clear: both;"></div>
+
+General
+^^^^^^^
+
+.. admonition:: Breaking API changes
+   :class: attention
+
+   8. Ray-cast functions now optionally compute the surface normal at the ray intersection. This is a breaking change
+      due to the addition of the ``mjtNum normal[3]`` argument. The modified functions are :ref:`mj_ray`,
+      :ref:`mj_multiRay`, :ref:`mju_rayGeom`, :ref:`mj_rayFlex`, :ref:`mj_rayHfield` and :ref:`mj_rayMesh`.
+
+      **Migration:** In C/C++, pass ``NULL`` to the ``normal`` argument. In Python, in all functions except
+      :ref:`mj_multiRay`, it defaults to ``None``, so no action is required.
+
+   9. ``mju_rayFlex`` has been renamed to :ref:`mj_rayFlex` for consistency with other functions that take
+      ``mjModel*`` and ``mjData*`` arguments.
+
+   10. The ``mjModel.cam_orthographic`` field has been renamed to ``cam_projection``, with the semantic of a new enum
+       type :ref:`mjtProjection`. This will allow for more projection types in the future like fisheye cameras.
+       Relatedly, the ``camera/orthographic`` MJCF attribute for cameras has been renamed to
+       :ref:`camera/projection<body-camera-projection>` and now accepts the values ``orthographic`` and ``perspective``.
+
+       **Migration:** Replace ``orthographic = "false/true"`` with ``projection="perspective/orthographic"``,
+       respectively.
+
+   11. Removed ``getdir`` from the ``mjpResourceProvider`` struct. All Resource Providers now use the same shared
+       implementation.
+   12. When combining the ``margin`` or ``gap`` :ref:`parameters<CContact>` of two geoms to obtain the parameters
+       of a contact, the respective values are now **summed** rather than taking the maximum. This allows geom
+       margins to be a proper "inflation" of the geom.
+
+13. Camera frustum visualization is now triggered by setting :ref:`resolution<body-camera-resolution>` to values larger
+    than 1. Relatedly, frustum visualization also works for :ref:`orthographic<body-camera-projection>` cameras.
+    See :ref:`rangefinder<sensor-rangefinder>` for details.
+14. Cameras now have an :ref:`output<body-camera-output>` attribute, parsed into the ``mjModel.cam_output`` bitfield.
+    Unused by the renderer, it serves as a convenient location to store a camera's supported output types.
+15. Added :ref:`mj_mountVFS` and :ref:`mj_unmountVFS` functions for mounting a custom VFS provider. Mounting allows
+    providers to be used to open/read/close resources dynamically at arbitrary paths.
+16. The optimization whereby sequential :ref:`collision sensors<collision-sensors>` with identical attributes shared
+    computation has been removed. This results in a (likely minor) performance regression for models which exploited
+    this optimization. To recover the performance, use the :ref:`fromto<sensor-fromto>` and compute the other values
+    manually. If ``from = fromto[0:3]`` and ``to = fromto[3:6]`` then ``distance = norm(to-from)`` and
+    ``normal = normalize(to-from)``.
+17. :doc:`OpenUSD <OpenUSD/index>`:
+
+    - Parsing has been moved out of experimental into a mjpDecoder plugin. (documentation pending)
+    - OpenUSD can now be built with the
+      `third_party_deps/openusd <https://github.com/google-deepmind/mujoco/tree/main/cmake/third_party_deps/openusd>`__
+      CMake utility project.
+    - ``USD_DIR`` is no longer used by the MuJoCo CMake project, instead use ``pxr_DIR`` if you have a pre-built USD
+      library.
+    - Users no longer have to set ``PXR_PLUGINPATH_NAME`` environment variable, MuJoCo should load USD plugins
+      automatically.
+18. Non-breaking ABI changes:
+
+    - The type of the ``sig`` (signature) argument of :ref:`mj_stateSize` and related functions has been changed from
+      ``unsigned int`` to ``int``. Before this change, invalid negative arguments passed to this function would result
+      in a silent implicit cast; now, negativity will trigger an error.
+    - Added a :ref:`depth<mjtRndFlag>` rendering flag.
+    - Allocation sizes in :ref:`mjModel` now use 64-bit rather than 32-bit integers to accommodate larger scenes.
+
 
 MJX
 ^^^
-- Added ``actuator_length``, ``cdof`` and ``cdof_dof`` fields to ``mjx.Data``.
-
+19. Added ``actuator_length``, ``cdof`` and ``cdof_dof`` fields to ``mjx.Data``.
+20. Add ``graph_mode`` argument to ``put_model`` to support multiple Warp graph capture modes.
 
 Documentation
 ^^^^^^^^^^^^^
-- General improvements to the :ref:`Programming/Simulation<Simulation>` chapter. Notably, the main discussion of
-  :ref:`state<siStateControl>` has been moved there, and the section on :ref:`mjModel changes<siChange>` has been
-  expanded.
+21. General improvements to the :ref:`Programming/Simulation<Simulation>` chapter. Notably, the main discussion of
+    :ref:`state<siStateControl>` has been moved there, and the section on :ref:`mjModel changes<siChange>` has been
+    expanded.
+22. The usability of the :ref:`MJCF schema<CSchema>` is improved with a collapsible dropdown menu with links to elements
+    and attributes.
+23. MuJoCo version numbering is now based on Semantic Versioning, see
+    `VERSIONING.md <https://github.com/google-deepmind/mujoco/blob/main/VERSIONING.md>`__.
 
 
 Bug fixes
 ^^^^^^^^^
-- The ``vertid`` argument of :ref:`mju_rayFlex` and :ref:`mju_raySkin` was marked as nullable but was not; it is now
-  nullable.
+24. Fixed a bug in :ref:`implicit integrator<geIntegrators>` derivatives where actuator velocity derivatives were
+    incorrectly computed when the force was clamped by :ref:`forcerange<actuator-general-forcerange>`.
+25. Fixed a bug in :ref:`implicit integrator<geIntegrators>` derivatives where actuator velocity derivatives did not
+    account for the :ref:`actearly<actuator-general-actearly>` flag.
+26. Multi-threaded mesh processing, enabled by the :ref:`usethread<compiler-usethread>` compiler flag (on by default),
+    was in fact disabled by the flag. Fixing this bug speeds up compilation of mesh-heavy models by (up to) the number
+    of available cores.
+27. The ``vertid`` argument of :ref:`mj_rayFlex` and :ref:`mju_raySkin` was marked as nullable but was not; it is now
+    nullable.
+28. Fixed :ref:`gravcomp<body-gravcomp>` being ignored for bodies with no joints nested inside jointed parent bodies
+    (:issue:`3066`, reported by :github:user:`Alex108306`).
 
 Version 3.4.0 (December 5, 2025)
 --------------------------------
@@ -60,7 +291,8 @@ Version 3.4.0 (December 5, 2025)
 General
 ^^^^^^^
 
-.. youtube:: vct493lGQ8Q
+.. youtube:: aKa3ZlEF9_Y
+   :aspect: 2:1
    :align: right
    :width: 35%
 
@@ -990,7 +1222,7 @@ General
    forces on the joint are treated as applied by actuators. See attribute documentation for more details. The example
    model
    `refsite.xml <https://github.com/google-deepmind/mujoco/blob/main/test/engine/testdata/actuation/refsite.xml>`__,
-   which demostrates Cartesian actuation of an arm, has been updated to use this attribute.
+   which demonstrates Cartesian actuation of an arm, has been updated to use this attribute.
 3. Added support for gmsh format 2.2 , tetrahedral mesh, as generated by e.g. `fTetwild <https://github.com/wildmeshing/fTetWild>`__.
 
 4. Added :ref:`mju_euler2Quat` for converting an Euler-angle sequence to quaternion.
@@ -1358,8 +1590,8 @@ General
        Each row of length ``mjNSOLVER`` contains separate solver statistics for each constraint island.
        If the solver does not use islands, only row 0 is filled.
 
-       - The new constant :ref:`mjNISLAND<glNumeric>` was set to 20.
-       - :ref:`mjNSOLVER<glNumeric>` was reduced from 1000 to 200.
+       - The new constant :ref:`mjNISLAND<glNumericSizes>` was set to 20.
+       - :ref:`mjNSOLVER<glNumericSizes>` was reduced from 1000 to 200.
        - Added :ref:`mjData.solver_nisland<mjData>`: the number of islands for which the solver ran.
        - Renamed ``mjData.solver_iter`` to ``solver_niter``. Both this member and ``mjData.solver_nnz`` are now integer
          vectors of length ``mjNISLAND``.
@@ -2515,7 +2747,7 @@ UI
 11. Figure selection type changed from ``int`` to ``float``.
 #. Figures now show data coordinates, when selection and highlight are enabled.
 #. Changed ``mjMAXUIMULTI`` to 35, ``mjMAXUITEXT`` to 300, ``mjMAXUIRECT`` to 25.
-#. Added collapsable sub-sections, implemented as separators with state: ``mjSEPCLOSED`` collapsed, ``mjSEPCLOSED+1``
+#. Added collapsible sub-sections, implemented as separators with state: ``mjSEPCLOSED`` collapsed, ``mjSEPCLOSED+1``
    expanded.
 #. Added ``mjITEM_RADIOLINE`` item type.
 #. Added function ``mjui_addToSection`` to simplify UI section construction.

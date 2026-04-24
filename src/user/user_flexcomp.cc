@@ -13,12 +13,14 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <queue>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -77,11 +79,12 @@ bool IsValidElementOrNodeHeader22(const std::string& line) {
 mjCFlexcomp::mjCFlexcomp(void) {
   type = mjFCOMPTYPE_GRID;
   count[0] = count[1] = count[2] = 10;
+  cellcount[0] = cellcount[1] = cellcount[2] = -1;
   mjuu_setvec(spacing, 0.02, 0.02, 0.02);
   mjuu_setvec(scale, 1, 1, 1);
   mass = 1;
   inertiabox = 0.005;
-  equality = false;
+  equality = 0;
   mjuu_setvec(pos, 0, 0, 0);
   mjuu_setvec(quat, 1, 0, 0, 0);
   rigid = false;
@@ -97,9 +100,159 @@ mjCFlexcomp::mjCFlexcomp(void) {
 }
 
 
+// identify empty cells and pin nodes exclusively in empty cells
+void mjCFlexcomp::MarkEmptyCells(mjCFlex* flex, const double* points,
+                                 int npnt, const double minmax[6],
+                                 int nx, int ny, int nz) {
+  int cx = flex->spec.cellcount[0];
+  int cy = flex->spec.cellcount[1];
+  int cz = flex->spec.cellcount[2];
+  int ncells = cx * cy * cz;
+  int order = flex->spec.order;
+
+  // determine which cells contain mesh elements (not just vertices)
+  // for each element, compute its AABB and mark all overlapping cells
+  std::vector<bool> has_element(ncells, false);
+
+  double dx = minmax[3] - minmax[0];
+  double dy = minmax[4] - minmax[1];
+  double dz = minmax[5] - minmax[2];
+
+  // vertices per element: dim+1 (edges=2, triangles=3, tets=4)
+  int nvpe = flex->spec.dim + 1;
+
+  if (nvpe > 0 && !element.empty()) {
+    int nelem = element.size() / nvpe;
+    for (int e = 0; e < nelem; e++) {
+      // compute element AABB
+      double elo[3] = {1e30, 1e30, 1e30};
+      double ehi[3] = {-1e30, -1e30, -1e30};
+      for (int v = 0; v < nvpe; v++) {
+        int vid = element[nvpe * e + v];
+        for (int j = 0; j < 3; j++) {
+          elo[j] = std::min(elo[j], points[3 * vid + j]);
+          ehi[j] = std::max(ehi[j], points[3 * vid + j]);
+        }
+      }
+
+      // map element AABB to cell range
+      auto cellIdx = [](double coord, double lo, double d, int nc) {
+        if (d <= 0) return 0;
+        int c = (int)((coord - lo) / d * nc);
+        return std::max(0, std::min(nc - 1, c));
+      };
+
+      int ci0 = cellIdx(elo[0], minmax[0], dx, cx);
+      int ci1 = cellIdx(ehi[0], minmax[0], dx, cx);
+      int cj0 = cellIdx(elo[1], minmax[1], dy, cy);
+      int cj1 = cellIdx(ehi[1], minmax[1], dy, cy);
+      int ck0 = cellIdx(elo[2], minmax[2], dz, cz);
+      int ck1 = cellIdx(ehi[2], minmax[2], dz, cz);
+
+      // mark all overlapping cells as containing elements
+      for (int ci = ci0; ci <= ci1; ci++) {
+        for (int cj = cj0; cj <= cj1; cj++) {
+          for (int ck = ck0; ck <= ck1; ck++) {
+            has_element[ci * cy * cz + cj * cz + ck] = true;
+          }
+        }
+      }
+    }
+  }
+
+  // default: all cells non-empty (only exterior cells will be empty)
+  flex->cell_empty.assign(ncells, false);
+
+  // for dim=2 (surface mesh): check watertightness and flood-fill
+  if (flex->spec.dim == 2 && nvpe == 3 && !element.empty()) {
+    // flood-fill from grid boundary to find exterior cells
+    // cells reachable from the boundary through non-element cells
+    // are outside the mesh volume; cells NOT reachable are interior
+    std::vector<bool> visited(ncells, false);
+    std::queue<std::array<int, 3>> bfs;
+
+    // seed BFS from boundary cells that have no elements
+    for (int ci = 0; ci < cx; ci++) {
+      for (int cj = 0; cj < cy; cj++) {
+        for (int ck = 0; ck < cz; ck++) {
+          if (ci == 0 || ci == cx - 1 ||
+              cj == 0 || cj == cy - 1 ||
+              ck == 0 || ck == cz - 1) {
+            int idx = ci * cy * cz + cj * cz + ck;
+            if (!has_element[idx] && !visited[idx]) {
+              visited[idx] = true;
+              flex->cell_empty[idx] = true;
+              bfs.push({ci, cj, ck});
+            }
+          }
+        }
+      }
+    }
+
+    // BFS: spread through non-element cells
+    const int dirs[6][3] = {
+        {-1, 0, 0}, {1, 0, 0},  {0, -1, 0},
+        {0, 1, 0},  {0, 0, -1}, {0, 0, 1}};
+    while (!bfs.empty()) {
+      auto [ci, cj, ck] = bfs.front();
+      bfs.pop();
+      for (auto& d : dirs) {
+        int ni = ci + d[0], nj = cj + d[1], nk = ck + d[2];
+        if (ni < 0 || ni >= cx ||
+            nj < 0 || nj >= cy ||
+            nk < 0 || nk >= cz) {
+          continue;
+        }
+        int nidx = ni * cy * cz + nj * cz + nk;
+        if (!visited[nidx] && !has_element[nidx]) {
+          visited[nidx] = true;
+          flex->cell_empty[nidx] = true;
+          bfs.push({ni, nj, nk});
+        }
+      }
+    }
+  } else {
+    // dim!=2 (e.g., tet mesh): cells without element overlap are empty
+    for (int c = 0; c < ncells; c++) {
+      flex->cell_empty[c] = !has_element[c];
+    }
+  }
+
+  // pin nodes that belong exclusively to empty cells
+  for (int gi = 0; gi < nx; gi++) {
+    for (int gj = 0; gj < ny; gj++) {
+      for (int gk = 0; gk < nz; gk++) {
+        // find all cells that reference this node
+        bool all_empty = true;
+        int ci_min = std::max(0, gi == 0 ? 0 : (gi - 1) / order);
+        int ci_max = std::min(cx - 1, gi / order);
+        int cj_min = std::max(0, gj == 0 ? 0 : (gj - 1) / order);
+        int cj_max = std::min(cy - 1, gj / order);
+        int ck_min = std::max(0, gk == 0 ? 0 : (gk - 1) / order);
+        int ck_max = std::min(cz - 1, gk / order);
+
+        for (int ci = ci_min; ci <= ci_max && all_empty; ci++) {
+          for (int cj = cj_min; cj <= cj_max && all_empty; cj++) {
+            for (int ck = ck_min; ck <= ck_max && all_empty; ck++) {
+              if (!flex->cell_empty[ci * cy * cz + cj * cz + ck]) {
+                all_empty = false;
+              }
+            }
+          }
+        }
+
+        if (all_empty) {
+          int idx = gi * ny * nz + gj * nz + gk;
+          pinned[idx] = true;
+        }
+      }
+    }
+  }
+}
+
 
 // make flexcomp object
-bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
+bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz, const mjVFS* vfs) {
   mjCModel* model = static_cast<mjCBody*>(body->element)->model;
   mjsCompiler* compiler = static_cast<mjCBody*>(body->element)->compiler;
   mjsFlex* dflex = def.spec.flex;
@@ -170,11 +323,11 @@ bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
       break;
 
     case mjFCOMPTYPE_MESH:
-      res = MakeMesh(model, compiler, error, error_sz);
+      res = MakeMesh(model, compiler, error, error_sz, vfs);
       break;
 
     case mjFCOMPTYPE_GMSH:
-      res = MakeGMSH(model, compiler, error, error_sz);
+      res = MakeGMSH(model, compiler, error, error_sz, vfs);
       break;
 
     case mjFCOMPTYPE_DIRECT:
@@ -204,8 +357,9 @@ bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
   if (pingridrange.size()%(2*dflex->dim)) {
     return comperr(error, "Pin grid range number of must be multiple of 2*dim", error_sz);
   }
-  if (type != mjFCOMPTYPE_GRID && !(pingrid.empty() && pingridrange.empty())) {
-    return comperr(error, "Pin grid(range) can only be used with grid type", error_sz);
+  if (type != mjFCOMPTYPE_GRID && !(pingrid.empty() && pingridrange.empty()) &&
+      doftype != mjFCOMPDOF_TRILINEAR && doftype != mjFCOMPDOF_QUADRATIC) {
+    return comperr(error, "Pin grid(range) can only be used with grid or interpolated", error_sz);
   }
   if (dflex->dim == 1 && !(pingrid.empty() && pingridrange.empty())) {
     return comperr(error, "Pin grid(range) cannot be used with dim=1", error_sz);
@@ -267,7 +421,22 @@ bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
   }
 
   // construct pinned array
-  pinned = vector<bool>(npnt, rigid);
+  int nnode = 0;
+  if (doftype == mjFCOMPDOF_TRILINEAR || doftype == mjFCOMPDOF_QUADRATIC) {
+    int order = doftype == mjFCOMPDOF_TRILINEAR ? 1 : 2;
+    // multi-cell count for mesh/direct/gmsh, else single cell
+    int cx = 1, cy = 1, cz = 1;
+    if (type == mjFCOMPTYPE_MESH || type == mjFCOMPTYPE_DIRECT ||
+        type == mjFCOMPTYPE_GMSH) {
+      if (cellcount[0] >= 0) {
+        cx = cellcount[0];
+        cy = cellcount[1];
+        cz = cellcount[2];
+      }
+    }
+    nnode = (cx*order+1) * (cy*order+1) * (cz*order+1);
+  }
+  pinned = vector<bool>(std::max(npnt, nnode), rigid);
 
   // handle pins if user did not specify rigid
   if (!rigid) {
@@ -299,8 +468,14 @@ bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
     // process pingrid
     for (int i=0; i < (int)pingrid.size(); i+=dflex->dim) {
       // check range
+      int count_check[3] = {count[0], count[1], count[2]};
+      if (type != mjFCOMPTYPE_GRID && (doftype == mjFCOMPDOF_TRILINEAR ||
+                                       doftype == mjFCOMPDOF_QUADRATIC)) {
+        int dim = (doftype == mjFCOMPDOF_TRILINEAR) ? 2 : 3;
+        count_check[0] = count_check[1] = count_check[2] = dim;
+      }
       for (int k=0; k < dflex->dim; k++) {
-        if (pingrid[i+k] < 0 || pingrid[i+k] >= count[k]) {
+        if (pingrid[i+k] < 0 || pingrid[i+k] >= count_check[k]) {
           return comperr(error, "pingrid out of range", error_sz);
         }
       }
@@ -392,6 +567,35 @@ bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
       for (int i=0; i < (int)element.size(); i++) {
         element[i] += reindex[element[i]];
       }
+
+      // compact point, texcoord, pinned arrays
+      int new_npnt = 0;
+      for (int i=0; i < npnt; i++) {
+        if (used[i]) {
+          point[3*new_npnt+0] = point[3*i+0];
+          point[3*new_npnt+1] = point[3*i+1];
+          point[3*new_npnt+2] = point[3*i+2];
+
+          if (!texcoord.empty()) {
+            texcoord[2*new_npnt+0] = texcoord[2*i+0];
+            texcoord[2*new_npnt+1] = texcoord[2*i+1];
+          }
+
+          pinned[new_npnt] = pinned[i];
+          new_npnt++;
+        }
+      }
+
+      // resize arrays
+      point.resize(3*new_npnt);
+      if (!texcoord.empty()) {
+        texcoord.resize(2*new_npnt);
+      }
+      pinned.resize(std::max(new_npnt, nnode));
+      used.assign(new_npnt, true);
+
+      // update count
+      npnt = new_npnt;
     }
   }
 
@@ -460,14 +664,6 @@ bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
       // add new body at vertex coordinates
       mjsBody* pb = mjs_addBody(body, 0);
 
-      // add geom if vertcollide
-      if (dflex->vertcollide) {
-        mjsGeom* geom = mjs_addGeom(pb, 0);
-        geom->type = mjGEOM_SPHERE;
-        geom->size[0] = dflex->radius;
-        geom->group = 4;
-      }
-
       // set frame and inertial
       pb->pos[0] = point[3*i];
       pb->pos[1] = point[3*i+1];
@@ -504,6 +700,17 @@ bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
         }
       }
 
+      // add two orthogonal sliders (x and y only)
+      else if (doftype == mjFCOMPDOF_2D) {
+        for (int j=0; j < 2; j++) {
+          mjsJoint* jnt = mjs_addJoint(pb, 0);
+          jnt->type = mjJNT_SLIDE;
+          mjuu_setvec(jnt->pos, 0, 0, 0);
+          mjuu_setvec(jnt->axis, 0, 0, 0);
+          jnt->axis[j] = 1;
+        }
+      }
+
       // construct body name, add to vertbody
       char txt[100];
       mju::sprintf_arr(txt, "%s_%d", name.c_str(), i);
@@ -528,47 +735,101 @@ bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
     }
   }
 
-  // create nodal mesh for trilinear interpolation
+  // create nodal mesh for trilinear/quadratic interpolation
   if (doftype == mjFCOMPDOF_TRILINEAR || doftype == mjFCOMPDOF_QUADRATIC) {
-    int order = doftype == mjFCOMPDOF_TRILINEAR ? 1 : 2;
-    flex->SetOrder(order);
-    std::vector<double> node(3*(order+1)*(order+1)*(order+1), 0);
+    flex->spec.order = doftype == mjFCOMPDOF_TRILINEAR ? 1 : 2;
+
+    if (cellcount[0] >= 0) {
+      flex->spec.cellcount[0] = cellcount[0];
+      flex->spec.cellcount[1] = cellcount[1];
+      flex->spec.cellcount[2] = cellcount[2];
+    }
+
+    // total number of nodes with shared boundaries
+    int nx = flex->spec.cellcount[0] * flex->spec.order + 1;
+    int ny = flex->spec.cellcount[1] * flex->spec.order + 1;
+    int nz = flex->spec.cellcount[2] * flex->spec.order + 1;
+    int nnode = nx * ny * nz;
+
+    // mark empty cells and pin nodes exclusively in empty cells
+    MarkEmptyCells(flex, point.data(), npnt, minmax, nx, ny, nz);
+
+    // if MarkEmptyCells pinned any nodes, force centered=false
+    // so that pf->node (local positions) is saved to the model
+    if (centered) {
+      for (int i = 0; i < nnode; i++) {
+        if (pinned[i]) {
+          centered = false;
+          break;
+        }
+      }
+    }
+
+    std::vector<double> node(3 * nnode, 0);
     int idx = 0;
-    double step = 1.0 / (double)order;
+
+    // Simpson's rule weights for quadratic mass distribution
     double massP2[3] = {1. / 6., 2. / 3., 1. / 6.};
-    for (int i=0; i <= order; i++) {
-      for (int j=0; j <= order; j++) {
-        for (int k=0; k <= order; k++) {
+
+
+
+    // collect created bodies for mass normalization
+    std::vector<mjsBody*> node_bodies;
+
+    for (int gi = 0; gi < nx; gi++) {
+      for (int gj = 0; gj < ny; gj++) {
+        for (int gk = 0; gk < nz; gk++) {
+          // parametric position in [0, 1]^3
+          double s = (double)gi / (flex->spec.cellcount[0] * flex->spec.order);
+          double t = (double)gj / (flex->spec.cellcount[1] * flex->spec.order);
+          double u = (double)gk / (flex->spec.cellcount[2] * flex->spec.order);
+
+          // physical position
+          double px = minmax[0] + s * (minmax[3] - minmax[0]);
+          double py = minmax[1] + t * (minmax[4] - minmax[1]);
+          double pz = minmax[2] + u * (minmax[5] - minmax[2]);
+
           if (pinned[idx]) {
-            node[3*idx+0] = minmax[0] + i * step * (minmax[3] - minmax[0]);
-            node[3*idx+1] = minmax[1] + j * step * (minmax[4] - minmax[1]);
-            node[3*idx+2] = minmax[2] + k * step * (minmax[5] - minmax[2]);
-            mjs_appendString(pf->nodebody, mjs_getName(body->element)->c_str());
+            node[3*idx+0] = px;
+            node[3*idx+1] = py;
+            node[3*idx+2] = pz;
+            mjs_appendString(pf->nodebody,
+                             mjs_getName(body->element)->c_str());
             idx++;
             continue;
           }
 
           mjsBody* pb = mjs_addBody(body, 0);
-          pb->pos[0] = minmax[0] + i * step * (minmax[3] - minmax[0]);
-          pb->pos[1] = minmax[1] + j * step * (minmax[4] - minmax[1]);
-          pb->pos[2] = minmax[2] + k * step * (minmax[5] - minmax[2]);
+          pb->pos[0] = px;
+          pb->pos[1] = py;
+          pb->pos[2] = pz;
           mjuu_zerovec(pb->ipos, 3);
+
+          // mass distribution
           if (doftype == mjFCOMPDOF_TRILINEAR) {
-            pb->mass = mass / 8;
+            pb->mass = 1.0;
           } else {
-            pb->mass = mass * massP2[i] * massP2[j] * massP2[k];
+            // local index within the cell for mass computation
+            int li = gi % flex->spec.order;
+            int lj = gj % flex->spec.order;
+            int lk = gk % flex->spec.order;
+            // boundary nodes: average mass contribution
+            int ncells_i = (gi > 0 && gi < nx-1 && li == 0) ? 2 : 1;
+            int ncells_j = (gj > 0 && gj < ny-1 && lj == 0) ? 2 : 1;
+            int ncells_k = (gk > 0 && gk < nz-1 && lk == 0) ? 2 : 1;
+            // use Simpson weights
+            double wi = massP2[li == 0 ? 0 : li];
+            double wj = massP2[lj == 0 ? 0 : lj];
+            double wk = massP2[lk == 0 ? 0 : lk];
+            pb->mass = wi * wj * wk * ncells_i * ncells_j * ncells_k;
           }
+
+          node_bodies.push_back(pb);
+
           pb->inertia[0] = pb->mass*(2.0*inertiabox*inertiabox)/3.0;
           pb->inertia[1] = pb->mass*(2.0*inertiabox*inertiabox)/3.0;
           pb->inertia[2] = pb->mass*(2.0*inertiabox*inertiabox)/3.0;
           pb->explicitinertial = true;
-
-          // add geom if vertcollide
-          if (dflex->vertcollide) {
-            mjsGeom* geom = mjs_addGeom(pb, 0);
-            geom->type = mjGEOM_SPHERE;
-            geom->size[0] = dflex->radius;
-          }
 
           for (int d=0; d < 3; d++) {
             mjsJoint* jnt = mjs_addJoint(pb, 0);
@@ -580,12 +841,27 @@ bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
 
           // construct node name, add to nodebody
           char txt[100];
-          mju::sprintf_arr(txt, "%s_%d_%d_%d", name.c_str(), i, j, k);
+          mju::sprintf_arr(txt, "%s_%d_%d_%d", name.c_str(), gi, gj, gk);
           mjs_setName(pb->element, txt);
           mjs_appendString(pf->nodebody, mjs_getName(pb->element)->c_str());
 
           idx++;
         }
+      }
+    }
+
+    // normalize masses so total equals prescribed mass
+    double total_mass = 0;
+    for (mjsBody* pb : node_bodies) {
+      total_mass += pb->mass;
+    }
+    if (total_mass > 0) {
+      double scale = mass / total_mass;
+      for (mjsBody* pb : node_bodies) {
+        pb->mass *= scale;
+        pb->inertia[0] *= scale;
+        pb->inertia[1] *= scale;
+        pb->inertia[2] *= scale;
       }
     }
 
@@ -598,13 +874,41 @@ bool mjCFlexcomp::Make(mjsBody* body, char* error, int error_sz) {
     mjs_setDouble(pf->vert, point.data(), point.size());
   }
 
-  // create edge equality constraint
+  // create equality constraints
   if (equality) {
-    mjsEquality* pe = mjs_addEquality(&model->spec, &def.spec);
-    mjs_setDefault(pe->element, &model->Default()->spec);
-    pe->type = mjEQ_FLEX;
-    pe->active = true;
-    mjs_setString(pe->name1, name.c_str());
+    // equality 1=edge(mjEQ_FLEX), 2=vert(mjEQ_FLEXVERT), 3=strain(mjEQ_FLEXSTRAIN)
+    if (equality == 1 || equality == 2) {
+      mjsEquality* pe = mjs_addEquality(&model->spec, &def.spec);
+      mjs_setDefault(pe->element, &model->Default()->spec);
+      pe->type = (equality == 1) ? mjEQ_FLEX : mjEQ_FLEXVERT;
+      pe->active = true;
+      mjs_setString(pe->name1, name.c_str());
+    } else if (equality == 3) {
+      // create one strain constraint per cell, storing cell index in eq_data
+      flex->has_strain_eq = true;
+      int cell_cx = flex->spec.cellcount[0];
+      int cell_cy = flex->spec.cellcount[1];
+      int cell_cz = flex->spec.cellcount[2];
+      for (int ci = 0; ci < cell_cx; ci++) {
+        for (int cj = 0; cj < cell_cy; cj++) {
+          for (int ck = 0; ck < cell_cz; ck++) {
+            // skip empty cells
+            if (!flex->cell_empty.empty() &&
+                flex->cell_empty[ci * cell_cy * cell_cz + cj * cell_cz + ck]) {
+              continue;
+            }
+            mjsEquality* pe = mjs_addEquality(&model->spec, &def.spec);
+            mjs_setDefault(pe->element, &model->Default()->spec);
+            pe->type = mjEQ_FLEXSTRAIN;
+            pe->active = true;
+            mjs_setString(pe->name1, name.c_str());
+            pe->data[0] = ci;
+            pe->data[1] = cj;
+            pe->data[2] = ck;
+          }
+        }
+      }
+    }
   }
 
   return true;
@@ -1087,7 +1391,7 @@ template <typename T> static T* VecToArray(std::vector<T>& vector, bool clear = 
 
 
 // make mesh
-bool mjCFlexcomp::MakeMesh(mjCModel* model, mjsCompiler* compiler, char* error, int error_sz) {
+bool mjCFlexcomp::MakeMesh(mjCModel* model, mjsCompiler* compiler, char* error, int error_sz, const mjVFS* vfs) {
   // strip path
   if (!file.empty() && model->spec.strippath) {
     file = mjuu_strippath(file);
@@ -1114,7 +1418,7 @@ bool mjCFlexcomp::MakeMesh(mjCModel* model, mjsCompiler* compiler, char* error, 
 
   try {
     resource = mjCBase::LoadResource(mjs_getString(model->spec.modelfiledir),
-                                     filename, 0);
+                                     filename, vfs);
   } catch (mjCError err) {
     return comperr(error, err.message, error_sz);
   }
@@ -1136,7 +1440,7 @@ bool mjCFlexcomp::MakeMesh(mjCModel* model, mjsCompiler* compiler, char* error, 
   }
 
   // copy vertices
-  point = mesh.Vert();
+  point.assign(mesh.Vert().begin(), mesh.Vert().end());
 
   if (mesh.HasTexcoord()) {
     texcoord = mesh.Texcoord();
@@ -1206,7 +1510,7 @@ static int findstring(const char* buffer, int buffer_sz, const char* str) {
 
 
 // load points and elements from GMSH file
-bool mjCFlexcomp::MakeGMSH(mjCModel* model, mjsCompiler* compiler, char* error, int error_sz) {
+bool mjCFlexcomp::MakeGMSH(mjCModel* model, mjsCompiler* compiler, char* error, int error_sz, const mjVFS* vfs) {
   // strip path
   if (!file.empty() && model->spec.strippath) {
     file = mjuu_strippath(file);
@@ -1222,7 +1526,7 @@ bool mjCFlexcomp::MakeGMSH(mjCModel* model, mjsCompiler* compiler, char* error, 
   try {
     std::string filename = mjuu_combinePaths(mjs_getString(compiler->meshdir), file);
     resource = mjCBase::LoadResource(mjs_getString(model->spec.modelfiledir),
-                                     filename, 0);
+                                     filename, vfs);
   } catch (mjCError err) {
     return comperr(error, err.message, error_sz);
   }

@@ -1,17 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
+from __future__ import annotations
 
 import collections
 import ctypes
@@ -19,26 +9,31 @@ import inspect
 import threading
 import traceback
 from enum import IntEnum
-from typing import Callable, Optional
+from typing import Callable
 
 import jax
 
 import warp as wp
 from warp._src.codegen import get_full_arg_spec, make_full_qualified_name
+from warp._src.context import CudaMemcpyKind
 from warp._src.jax import get_jax_device
-from warp._src.types import array_t, launch_bounds_t, strides_from_shape, type_to_warp
+from warp._src.types import (
+    array_t,
+    launch_bounds_t,
+    matches_array_class,
+    strides_from_shape,
+    type_size_in_bytes,
+    type_to_warp,
+)
 
 from .xla_ffi import *
 
 _wp_module_name_ = "warp.jax_experimental.ffi"
 
-# Type alias for differentiable kernel cache key
-DiffKernelCacheKey = tuple[Callable, tuple, int, str, tuple[str, ...]]
-
 # Holders for the custom callbacks to keep them alive.
-_FFI_KERNEL_REGISTRY: dict[str, "FfiKernel"] = {}
-_FFI_DIFF_KERNEL_REGISTRY: dict[DiffKernelCacheKey, Callable] = {}
-_FFI_CALLABLE_REGISTRY: dict[str, "FfiCallable"] = {}
+_FFI_KERNEL_REGISTRY: dict[tuple, FfiKernel] = {}
+_FFI_DIFF_KERNEL_REGISTRY: dict[tuple, Callable] = {}
+_FFI_CALLABLE_REGISTRY: dict[tuple, FfiCallable] = {}
 _FFI_CALLBACK_REGISTRY: dict[str, ctypes.CFUNCTYPE] = {}
 _FFI_REGISTRY_LOCK = threading.Lock()
 
@@ -58,10 +53,38 @@ def check_jax_version():
         raise RuntimeError(msg)
 
 
+def collapse_batch_dims(shape, desired_ndim):
+    # roll leading batch dims into one
+    while len(shape) > desired_ndim:
+        shape = (shape[0] * shape[1], *shape[2:])
+    return shape
+
+
+def compute_batch_size(shape, batch_ndim):
+    # compute product of batch dims at front
+    batch_size = 1
+    for i in range(batch_ndim):
+        batch_size *= shape[i]
+    return batch_size
+
+
 class GraphMode(IntEnum):
-    NONE = 0  # don't capture a graph
-    JAX = 1  # let JAX capture a graph
-    WARP = 2  # let Warp capture a graph
+    """CUDA graph capture modes for :func:`warp.jax_experimental.jax_callable`.
+
+    These modes control whether JAX or Warp captures a CUDA graph, and whether
+    staging buffers are used when capturing with Warp.
+    """
+
+    NONE = 0
+    """Disable graph capture. Use when operations are not CUDA-graph compatible (for example, host synchronization)."""
+    JAX = 1
+    """Let JAX capture the graph so the callable can be used as a subgraph within a larger JAX capture."""
+    WARP = 2
+    """Let Warp capture the graph and replay it for matching buffer addresses."""
+    WARP_STAGED = 3
+    """Capture a Warp graph using staging buffers and insert memcpy nodes inside the graph."""
+    WARP_STAGED_EX = 4
+    """Capture a Warp graph using staging buffers and perform memcpy outside the graph."""
 
 
 class ModulePreloadMode(IntEnum):
@@ -75,7 +98,7 @@ class FfiArg:
         self.name = name
         self.type = type
         self.in_out = in_out
-        self.is_array = isinstance(type, wp.array)
+        self.is_array = matches_array_class(type, wp.array)
 
         if self.is_array:
             if hasattr(type.dtype, "_wp_scalar_type_"):
@@ -109,7 +132,15 @@ class FfiLaunchDesc:
 
 class FfiKernel:
     def __init__(
-        self, kernel, num_outputs, vmap_method, launch_dims, output_dims, in_out_argnames, module_preload_mode
+        self,
+        kernel,
+        num_outputs,
+        vmap_method,
+        launch_dims,
+        output_dims,
+        in_out_argnames,
+        module_preload_mode,
+        has_side_effect=False,
     ):
         self.kernel = kernel
         self.name = generate_unique_name(kernel.func)
@@ -118,6 +149,7 @@ class FfiKernel:
         self.launch_dims = launch_dims
         self.output_dims = output_dims
         self.module_preload_mode = module_preload_mode
+        self.has_side_effect = has_side_effect
         self.first_array_arg = None
         self.launch_id = 0
         self.launch_descriptors = {}
@@ -179,7 +211,7 @@ class FfiKernel:
 
         # register the callback
         FFI_CCALLFUNC = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.POINTER(XLA_FFI_CallFrame))
-        self.callback_func = FFI_CCALLFUNC(lambda call_frame: self.ffi_callback(call_frame))
+        self.callback_func = FFI_CCALLFUNC(self.ffi_callback)
         ffi_ccall_address = ctypes.cast(self.callback_func, ctypes.c_void_p)
         ffi_capsule = jax.ffi.pycapsule(ffi_ccall_address.value)
         jax.ffi.register_ffi_target(self.name, ffi_capsule, platform="CUDA")
@@ -234,7 +266,8 @@ class FfiKernel:
                 out_types.append(get_jax_output_type(input_arg, input_value.shape))
 
         # launch dimensions
-        if launch_dims is None:
+        infer_launch_dims = launch_dims is None
+        if infer_launch_dims:
             # use the shape of the first input array
             if self.first_array_arg is not None:
                 launch_dims = get_warp_shape(self.input_args[self.first_array_arg], args[self.first_array_arg].shape)
@@ -268,6 +301,7 @@ class FfiKernel:
             out_types,
             vmap_method=vmap_method,
             input_output_aliases=self.input_output_aliases,
+            has_side_effect=self.has_side_effect,
         )
 
         # preload on the specified devices
@@ -287,7 +321,9 @@ class FfiKernel:
 
         # save launch data to be retrieved by callback
         launch_id = self.launch_id
-        self.launch_descriptors[launch_id] = FfiLaunchDesc(static_inputs, launch_dims)
+        self.launch_descriptors[launch_id] = FfiLaunchDesc(
+            static_inputs, launch_dims if not infer_launch_dims else None
+        )
         self.launch_id += 1
 
         return call(*args, launch_id=launch_id)
@@ -327,19 +363,23 @@ class FfiKernel:
                 assert num_inputs == self.num_inputs
                 assert num_outputs == self.num_outputs
 
-                launch_bounds = launch_bounds_t(launch_desc.launch_dims)
-
                 # first kernel param is the launch bounds
                 kernel_params = (ctypes.c_void_p * (1 + self.num_kernel_args))()
-                kernel_params[0] = ctypes.addressof(launch_bounds)
-
                 arg_refs = []
+                batch_size = None
 
                 # input and in-out args
                 for i, input_arg in enumerate(self.input_args):
                     if input_arg.is_array:
                         buffer = inputs[i].contents
-                        shape = buffer.dims[: input_arg.type.ndim]
+                        shape = buffer.dims[: buffer.rank - input_arg.dtype_ndim]
+                        if buffer.rank > input_arg.jax_ndim:
+                            # handle batching
+                            shape = collapse_batch_dims(shape, input_arg.type.ndim)
+                            if batch_size is None:
+                                batch_size = compute_batch_size(
+                                    buffer.dims[: buffer.rank], buffer.rank - input_arg.jax_ndim
+                                )
                         strides = strides_from_shape(shape, input_arg.type.dtype)
                         arg = array_t(buffer.data, 0, input_arg.type.ndim, shape, strides)
                         kernel_params[i + 1] = ctypes.addressof(arg)
@@ -354,11 +394,33 @@ class FfiKernel:
                 # pure output args (skip in-out FFI buffers)
                 for i, output_arg in enumerate(self.output_args):
                     buffer = outputs[i + self.num_in_out].contents
-                    shape = buffer.dims[: output_arg.type.ndim]
+                    shape = buffer.dims[: buffer.rank - output_arg.dtype_ndim]
+                    if buffer.rank > output_arg.jax_ndim:
+                        # handle batching
+                        shape = collapse_batch_dims(shape, output_arg.type.ndim)
+                        if batch_size is None:
+                            batch_size = compute_batch_size(
+                                buffer.dims[: buffer.rank], buffer.rank - output_arg.jax_ndim
+                            )
                     strides = strides_from_shape(shape, output_arg.type.dtype)
                     arg = array_t(buffer.data, 0, output_arg.type.ndim, shape, strides)
                     kernel_params[num_inputs + i + 1] = ctypes.addressof(arg)
                     arg_refs.append(arg)  # keep a reference
+
+                # determine launch bounds
+                if launch_desc.launch_dims is None:
+                    # infer launch dims from argument shape, works with vmap
+                    arr = arg_refs[self.first_array_arg]
+                    launch_dims = arr.shape[: arr.ndim]
+                else:
+                    # use specified launch dims
+                    launch_dims = launch_desc.launch_dims
+                    if batch_size is not None:
+                        # roll batch size into the first launch dimension
+                        launch_dims = (batch_size * launch_dims[0], *launch_dims[1:])
+
+                launch_bounds = launch_bounds_t(launch_dims)
+                kernel_params[0] = ctypes.addressof(launch_bounds)
 
                 # get device and stream
                 device = wp.get_cuda_device(get_device_ordinal_from_callframe(call_frame.contents))
@@ -390,6 +452,28 @@ class FfiKernel:
 class FfiCallDesc:
     def __init__(self, static_inputs):
         self.static_inputs = static_inputs
+        self.capture = None
+
+        # staging arrays
+        self.input_staging_arrays = None  # inputs copied on each call
+        self.output_staging_arrays = None  # outputs copied on each call
+        self.static_staging_arrays = None  # arrays copied only once
+
+        # input memcpy info
+        self.input_memcpy_count = 0
+        self.input_memcpy_indices = None  # indices in FFI input buffers
+        self.input_memcpy_srcs = None
+        self.input_memcpy_dsts = None
+        self.input_memcpy_sizes = None
+        self.input_memcpy_kinds = None
+
+        # output memcpy info
+        self.output_memcpy_count = 0
+        self.output_memcpy_indices = None  # indices in FFI output buffers
+        self.output_memcpy_srcs = None
+        self.output_memcpy_dsts = None
+        self.output_memcpy_sizes = None
+        self.output_memcpy_kinds = None
 
 
 class FfiCallable:
@@ -403,8 +487,11 @@ class FfiCallable:
         vmap_method,
         output_dims,
         in_out_argnames,
+        stage_in_argnames,
+        stage_out_argnames,
         graph_cache_max,
         module_preload_mode,
+        has_side_effect=False,
     ):
         self.func = func
         self.name = generate_unique_name(func)
@@ -413,6 +500,7 @@ class FfiCallable:
         self.graph_mode = graph_mode
         self.output_dims = output_dims
         self.module_preload_mode = module_preload_mode
+        self.has_side_effect = has_side_effect
         self.first_array_arg = None
         self.call_id = 0
         self.call_descriptors = {}
@@ -420,6 +508,10 @@ class FfiCallable:
         # LRU cache of graphs captured by Warp
         self._graph_cache_max = graph_cache_max
         self.captures = collections.OrderedDict()
+
+        # Selective staging: None means copy all, else copy only specified
+        self.stage_in_argnames = set(stage_in_argnames) if stage_in_argnames else None
+        self.stage_out_argnames = set(stage_out_argnames) if stage_out_argnames else None
 
         in_out_argnames_list = in_out_argnames or []
         in_out_argnames = set(in_out_argnames_list)
@@ -444,7 +536,10 @@ class FfiCallable:
 
         # parse type annotations
         self.args = []
+        self.arg_input_indices = [None] * num_args  # index in FFI input buffers
+        self.arg_output_indices = [None] * num_args  # index in FFI output buffers
         arg_idx = 0
+        output_idx = 0
         for arg_name, arg_type in argspec.annotations.items():
             if arg_name == "return":
                 if arg_type is not None:
@@ -452,7 +547,7 @@ class FfiCallable:
                 continue
             else:
                 arg = FfiArg(arg_name, arg_type, arg_name in in_out_argnames)
-                if arg_name in in_out_argnames:
+                if arg.in_out:
                     in_out_argnames.remove(arg_name)
                 if arg.is_array:
                     if arg_idx < self.num_inputs and self.first_array_arg is None:
@@ -464,6 +559,14 @@ class FfiCallable:
                     f"Expected an output-only argument for argument {arg_name}."
                     " in_out arguments should be placed before output-only arguments."
                 )
+
+            # map each argument index to FFI input/output buffer indices
+            # (including in-out arguments)
+            if arg_idx < self.num_inputs:
+                self.arg_input_indices[arg_idx] = arg_idx
+            if arg_idx >= self.num_inputs or arg.in_out:
+                self.arg_output_indices[arg_idx] = output_idx
+                output_idx += 1
 
             arg_idx += 1
 
@@ -491,7 +594,7 @@ class FfiCallable:
 
         # register the callback
         FFI_CCALLFUNC = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.POINTER(XLA_FFI_CallFrame))
-        self.callback_func = FFI_CCALLFUNC(lambda call_frame: self.ffi_callback(call_frame))
+        self.callback_func = FFI_CCALLFUNC(self.ffi_callback)
         ffi_ccall_address = ctypes.cast(self.callback_func, ctypes.c_void_p)
         ffi_capsule = jax.ffi.pycapsule(ffi_ccall_address.value)
         jax.ffi.register_ffi_target(self.name, ffi_capsule, platform="CUDA")
@@ -569,7 +672,7 @@ class FfiCallable:
             out_types,
             vmap_method=vmap_method,
             input_output_aliases=self.input_output_aliases,
-            # has_side_effect=True,  # force this function to execute even if outputs aren't used
+            has_side_effect=self.has_side_effect,
         )
 
         # preload on the specified devices
@@ -636,32 +739,106 @@ class FfiCallable:
                 assert num_outputs == self.num_outputs
 
                 cuda_stream = get_stream_from_callframe(call_frame.contents)
+                device_ordinal = get_device_ordinal_from_callframe(call_frame.contents)
 
                 if self.graph_mode == GraphMode.WARP:
                     # check if we already captured an identical call
                     ip = [inputs[i].contents.data for i in self.array_input_indices]
                     op = [outputs[i].contents.data for i in self.array_output_indices]
-                    capture_key = hash((call_id, *ip, *op))
+                    capture_key = hash((device_ordinal, call_id, *ip, *op))
                     capture = self.captures.get(capture_key)
 
                     # launch existing graph
                     if capture is not None:
-                        # NOTE: We use the native graph API to avoid overhead with obtaining Stream and Device objects in Python.
-                        # This code should match wp.capture_launch().
-                        graph = capture.graph
-                        if graph.graph_exec is None:
-                            g = ctypes.c_void_p()
-                            if not wp._src.context.runtime.core.wp_cuda_graph_create_exec(
-                                graph.device.context, cuda_stream, graph.graph, ctypes.byref(g)
-                            ):
-                                raise RuntimeError(f"Graph creation error: {wp.context.runtime.get_error_string()}")
-                            graph.graph_exec = g
-
-                        if not wp._src.context.runtime.core.wp_cuda_graph_launch(graph.graph_exec, cuda_stream):
-                            raise RuntimeError(f"Graph launch error: {wp.context.runtime.get_error_string()}")
+                        graph_exec = capture.graph.graph_exec
+                        if not wp._src.context.runtime.core.wp_cuda_graph_launch(graph_exec, cuda_stream):
+                            raise RuntimeError(f"Graph launch error: {wp._src.context.runtime.get_error_string()}")
 
                         # update the graph cache to keep recently used graphs alive
                         self.captures.move_to_end(capture_key)
+
+                        # early out
+                        return
+
+                elif self.graph_mode == GraphMode.WARP_STAGED_EX:
+                    if call_desc.capture is not None:
+                        graph_exec = call_desc.capture.graph.graph_exec
+                        context = call_desc.capture.graph.device.context
+                        wp_memcpy_batch = wp._src.context.runtime.core.wp_memcpy_batch
+
+                        # set source pointers for input memcopies
+                        for memcpy_idx, input_idx in enumerate(call_desc.input_memcpy_indices):
+                            call_desc.input_memcpy_srcs[memcpy_idx] = inputs[input_idx].contents.data
+
+                        # copy inputs to staging buffers
+                        if not wp_memcpy_batch(
+                            context,
+                            call_desc.input_memcpy_dsts,
+                            call_desc.input_memcpy_srcs,
+                            call_desc.input_memcpy_sizes,
+                            call_desc.input_memcpy_count,
+                            cuda_stream,
+                        ):
+                            raise RuntimeError(
+                                f"Failed to run input memcpy batch: {wp._src.context.runtime.get_error_string()}"
+                            )
+
+                        # launch existing graph
+                        if not wp._src.context.runtime.core.wp_cuda_graph_launch(graph_exec, cuda_stream):
+                            raise RuntimeError(f"Graph launch error: {wp._src.context.runtime.get_error_string()}")
+
+                        # set destination pointers for output memcopies
+                        for memcpy_idx, output_idx in enumerate(call_desc.output_memcpy_indices):
+                            call_desc.output_memcpy_dsts[memcpy_idx] = outputs[output_idx].contents.data
+
+                        # copy the outputs from staging buffers
+                        if not wp_memcpy_batch(
+                            context,
+                            call_desc.output_memcpy_dsts,
+                            call_desc.output_memcpy_srcs,
+                            call_desc.output_memcpy_sizes,
+                            call_desc.output_memcpy_count,
+                            cuda_stream,
+                        ):
+                            raise RuntimeError(
+                                f"Failed to run output memcpy batch: {wp._src.context.runtime.get_error_string()}"
+                            )
+
+                        # early out
+                        return
+
+                elif self.graph_mode == GraphMode.WARP_STAGED:
+                    if call_desc.capture is not None:
+                        graph_exec = call_desc.capture.graph.graph_exec
+
+                        # set source pointers for input memcpy nodes
+                        memcpy_idx = 0
+                        for input_idx in call_desc.input_memcpy_indices:
+                            call_desc.memcpy_srcs[memcpy_idx] = inputs[input_idx].contents.data
+                            memcpy_idx += 1
+
+                        # set destination pointers for output memcpy nodes
+                        for output_idx in call_desc.output_memcpy_indices:
+                            call_desc.memcpy_dsts[memcpy_idx] = outputs[output_idx].contents.data
+                            memcpy_idx += 1
+
+                        # update all memcpy nodes
+                        if not wp._src.context.runtime.core.wp_cuda_graph_update_memcpy_batch(
+                            graph_exec,
+                            call_desc.memcpy_nodes,
+                            call_desc.memcpy_dsts,
+                            call_desc.memcpy_srcs,
+                            call_desc.memcpy_sizes,
+                            call_desc.memcpy_kinds,
+                            len(call_desc.memcpy_nodes),
+                        ):
+                            raise RuntimeError(
+                                f"Failed to update graph memcpy batch: {wp._src.context.runtime.get_error_string()}"
+                            )
+
+                        # launch existing graph
+                        if not wp._src.context.runtime.core.wp_cuda_graph_launch(graph_exec, cuda_stream):
+                            raise RuntimeError(f"Graph launch error: {wp._src.context.runtime.get_error_string()}")
 
                         # early out
                         return
@@ -677,7 +854,7 @@ class FfiCallable:
                 for i, arg in enumerate(self.input_args):
                     if arg.is_array:
                         buffer = inputs[i].contents
-                        shape = buffer.dims[: buffer.rank - arg.dtype_ndim]
+                        shape = collapse_batch_dims(buffer.dims[: buffer.rank - arg.dtype_ndim], arg.type.ndim)
                         arr = wp.array(ptr=buffer.data, dtype=arg.type.dtype, shape=shape, device=device)
                         arg_list.append(arr)
                     else:
@@ -688,7 +865,7 @@ class FfiCallable:
                 # pure output args (skip in-out FFI buffers)
                 for i, arg in enumerate(self.output_args):
                     buffer = outputs[i + self.num_in_out].contents
-                    shape = buffer.dims[: buffer.rank - arg.dtype_ndim]
+                    shape = collapse_batch_dims(buffer.dims[: buffer.rank - arg.dtype_ndim], arg.type.ndim)
                     arr = wp.array(ptr=buffer.data, dtype=arg.type.dtype, shape=shape, device=device)
                     arg_list.append(arr)
 
@@ -698,18 +875,143 @@ class FfiCallable:
                         # capturing with JAX
                         with wp.ScopedCapture(external=True) as capture:
                             self.func(*arg_list)
+
                         # keep a reference to the capture object to prevent required modules getting unloaded
                         call_desc.capture = capture
+
                     elif self.graph_mode == GraphMode.WARP:
                         # capturing with WARP
                         with wp.ScopedCapture() as capture:
                             self.func(*arg_list)
                         wp.capture_launch(capture.graph)
+
                         # keep a reference to the capture object and reuse it with same buffers
                         self.captures[capture_key] = capture
+
                         # respect the cache size limit if specified
                         if self._graph_cache_max is not None and len(self.captures) > self._graph_cache_max:
                             self.captures.popitem(last=False)
+
+                    elif self.graph_mode == GraphMode.WARP_STAGED_EX:
+                        # capturing with WARP using staging buffers and memcopies done outside of the graph
+                        wp_memcpy_batch = wp._src.context.runtime.core.wp_memcpy_batch
+
+                        # prepare staging arrays and memcpy info
+                        self._prepare_staging(arg_list, call_desc)
+
+                        # copy inputs to staging arrays (including in-out arrays)
+                        if not wp_memcpy_batch(
+                            device.context,
+                            call_desc.input_memcpy_dsts,
+                            call_desc.input_memcpy_srcs,
+                            call_desc.input_memcpy_sizes,
+                            call_desc.input_memcpy_count,
+                            cuda_stream,
+                        ):
+                            raise RuntimeError(
+                                f"Failed to run input memcpy batch: {wp._src.context.runtime.get_error_string()}"
+                            )
+
+                        # capture callback using staging arrays
+                        with wp.ScopedCapture() as capture:
+                            self.func(*arg_list)
+
+                        wp.capture_launch(capture.graph)
+
+                        # copy outputs from staging arrays (including in-out arrays)
+                        if not wp_memcpy_batch(
+                            device.context,
+                            call_desc.output_memcpy_dsts,
+                            call_desc.output_memcpy_srcs,
+                            call_desc.output_memcpy_sizes,
+                            call_desc.output_memcpy_count,
+                            cuda_stream,
+                        ):
+                            raise RuntimeError(
+                                f"Failed to run output memcpy batch: {wp._src.context.runtime.get_error_string()}"
+                            )
+
+                        # save the capture for replays
+                        # TODO: we should have a way of freeing this
+                        call_desc.capture = capture
+
+                    elif self.graph_mode == GraphMode.WARP_STAGED:
+                        # capturing with WARP using staging buffers and memcopies done inside of the graph
+                        wp_cuda_graph_insert_memcpy_batch = (
+                            wp._src.context.runtime.core.wp_cuda_graph_insert_memcpy_batch
+                        )
+
+                        # prepare staging arrays and memcpy info
+                        self._prepare_staging(arg_list, call_desc)
+
+                        # prepare graph memcpy nodes
+                        input_memcpy_count = call_desc.input_memcpy_count
+                        output_memcpy_count = call_desc.output_memcpy_count
+                        input_memcpy_nodes = (ctypes.c_void_p * input_memcpy_count)()
+                        output_memcpy_nodes = (ctypes.c_void_p * output_memcpy_count)()
+
+                        # capture using staging arrays and include memory copies
+                        with wp.ScopedCapture() as capture:
+                            # copy inputs
+                            if not wp_cuda_graph_insert_memcpy_batch(
+                                device.context,
+                                cuda_stream,
+                                call_desc.input_memcpy_dsts,
+                                call_desc.input_memcpy_srcs,
+                                call_desc.input_memcpy_sizes,
+                                call_desc.input_memcpy_kinds,
+                                call_desc.input_memcpy_count,
+                                input_memcpy_nodes,
+                            ):
+                                raise RuntimeError(
+                                    f"Failed to insert input memcpy batch: {wp._src.context.runtime.get_error_string()}"
+                                )
+
+                            # run the callback
+                            self.func(*arg_list)
+
+                            # copy outputs
+                            if not wp_cuda_graph_insert_memcpy_batch(
+                                device.context,
+                                cuda_stream,
+                                call_desc.output_memcpy_dsts,
+                                call_desc.output_memcpy_srcs,
+                                call_desc.output_memcpy_sizes,
+                                call_desc.output_memcpy_kinds,
+                                call_desc.output_memcpy_count,
+                                output_memcpy_nodes,
+                            ):
+                                raise RuntimeError(
+                                    f"Failed to insert output memcpy batch: {wp._src.context.runtime.get_error_string()}"
+                                )
+
+                        wp.capture_launch(capture.graph)
+
+                        # concatenate input and output memcopy nodes so they can be updated in one call
+                        num_nodes = input_memcpy_count + output_memcpy_count
+                        call_desc.memcpy_nodes = (ctypes.c_void_p * num_nodes)()
+                        call_desc.memcpy_srcs = (ctypes.c_void_p * num_nodes)()
+                        call_desc.memcpy_dsts = (ctypes.c_void_p * num_nodes)()
+                        call_desc.memcpy_sizes = (ctypes.c_size_t * num_nodes)()
+                        call_desc.memcpy_kinds = (ctypes.c_int * num_nodes)()
+                        for i in range(input_memcpy_count):
+                            call_desc.memcpy_nodes[i] = input_memcpy_nodes[i]
+                            call_desc.memcpy_srcs[i] = call_desc.input_memcpy_srcs[i]
+                            call_desc.memcpy_dsts[i] = call_desc.input_memcpy_dsts[i]
+                            call_desc.memcpy_sizes[i] = call_desc.input_memcpy_sizes[i]
+                            call_desc.memcpy_kinds[i] = call_desc.input_memcpy_kinds[i]
+                        for i in range(output_memcpy_count):
+                            j = input_memcpy_count + i
+                            call_desc.memcpy_nodes[j] = output_memcpy_nodes[i]
+                            call_desc.memcpy_srcs[j] = call_desc.output_memcpy_srcs[i]
+                            call_desc.memcpy_dsts[j] = call_desc.output_memcpy_dsts[i]
+                            call_desc.memcpy_sizes[j] = call_desc.output_memcpy_sizes[i]
+                            call_desc.memcpy_kinds[j] = call_desc.output_memcpy_kinds[i]
+
+                        # save the capture for replays
+                        # TODO: we should have a way of freeing this
+                        call_desc.capture = capture
+
                     else:
                         # not capturing
                         self.func(*arg_list)
@@ -721,6 +1023,96 @@ class FfiCallable:
             )
 
         return None
+
+    def _prepare_staging(self, arg_list, call_desc):
+        # create staging arrays
+        input_callback_arrays = []
+        input_staging_arrays = []
+        input_memcpy_indices = []
+        output_callback_arrays = []
+        output_staging_arrays = []
+        output_memcpy_indices = []
+        static_staging_arrays = []
+        for i, arg in enumerate(arg_list):
+            # we only care about arrays with non-zero size
+            if isinstance(arg, wp.array) and arg.size > 0:
+                staging_arr = wp.empty_like(arg)
+                input_idx = self.arg_input_indices[i]
+                if input_idx is not None:
+                    # check if this input needs to be copied every time or just once
+                    if self.stage_in_argnames is None or self.args[i].name in self.stage_in_argnames:
+                        input_callback_arrays.append(arg)
+                        input_staging_arrays.append(staging_arr)
+                        input_memcpy_indices.append(input_idx)
+                    else:
+                        wp.copy(staging_arr, arg)
+                        static_staging_arrays.append(staging_arr)
+                output_idx = self.arg_output_indices[i]
+                if output_idx is not None:
+                    # check if this output needs to be copied every time or just once
+                    if self.stage_out_argnames is None or self.args[i].name in self.stage_out_argnames:
+                        output_callback_arrays.append(arg)
+                        output_staging_arrays.append(staging_arr)
+                        output_memcpy_indices.append(output_idx)
+                    else:
+                        wp.copy(staging_arr, arg)
+                        static_staging_arrays.append(staging_arr)
+                # substitute staging array in argument list
+                arg_list[i] = staging_arr
+
+        # prepare input memcpy batch
+        input_memcpy_count = len(input_staging_arrays)
+        call_desc.input_memcpy_count = input_memcpy_count
+        call_desc.input_memcpy_indices = input_memcpy_indices
+        call_desc.input_memcpy_srcs = (ctypes.c_void_p * input_memcpy_count)()
+        call_desc.input_memcpy_dsts = (ctypes.c_void_p * input_memcpy_count)()
+        call_desc.input_memcpy_sizes = (ctypes.c_size_t * input_memcpy_count)()
+        call_desc.input_memcpy_kinds = (ctypes.c_int * input_memcpy_count)()
+        for i in range(input_memcpy_count):
+            size = input_staging_arrays[i].size * type_size_in_bytes(input_staging_arrays[i].dtype)
+            call_desc.input_memcpy_srcs[i] = input_callback_arrays[i].ptr
+            call_desc.input_memcpy_dsts[i] = input_staging_arrays[i].ptr
+            call_desc.input_memcpy_sizes[i] = size
+            call_desc.input_memcpy_kinds[i] = CudaMemcpyKind.D2D
+
+        # prepare output memcpy batch
+        output_memcpy_count = len(output_staging_arrays)
+        call_desc.output_memcpy_count = output_memcpy_count
+        call_desc.output_memcpy_indices = output_memcpy_indices
+        call_desc.output_memcpy_srcs = (ctypes.c_void_p * output_memcpy_count)()
+        call_desc.output_memcpy_dsts = (ctypes.c_void_p * output_memcpy_count)()
+        call_desc.output_memcpy_sizes = (ctypes.c_size_t * output_memcpy_count)()
+        call_desc.output_memcpy_kinds = (ctypes.c_int * output_memcpy_count)()
+        for i in range(output_memcpy_count):
+            size = output_staging_arrays[i].size * type_size_in_bytes(output_staging_arrays[i].dtype)
+            call_desc.output_memcpy_srcs[i] = output_staging_arrays[i].ptr
+            call_desc.output_memcpy_dsts[i] = output_callback_arrays[i].ptr
+            call_desc.output_memcpy_sizes[i] = size
+            call_desc.output_memcpy_kinds[i] = CudaMemcpyKind.D2D
+
+        # hang on to the staging arrays to prevent GC
+        # TODO: we should have a way of freeing this
+        call_desc.input_staging_arrays = input_staging_arrays
+        call_desc.output_staging_arrays = output_staging_arrays
+        call_desc.static_staging_arrays = static_staging_arrays
+
+        if wp.config.verbose:
+            # print some stats
+            total_input_size = 0
+            for i in range(input_memcpy_count):
+                total_input_size += int(call_desc.input_memcpy_sizes[i])
+            total_output_size = 0
+            for i in range(output_memcpy_count):
+                total_output_size += int(call_desc.output_memcpy_sizes[i])
+            print("FFI graph staging stats:")
+            print(f"  input memcpy indices: {input_memcpy_indices}")
+            print(f"  output memcpy indices: {output_memcpy_indices}")
+            print(f"  input memcpy count: {input_memcpy_count}")
+            print(f"  output memcpy count: {output_memcpy_count}")
+            print(f"  total memcpy count: {input_memcpy_count + output_memcpy_count}")
+            print(f"  total input size: {total_input_size} bytes")
+            print(f"  total output size: {total_output_size} bytes")
+            print(f"  total size: {total_input_size + total_output_size} bytes")
 
     @property
     def graph_cache_max(self) -> int | None:
@@ -749,6 +1141,7 @@ def jax_kernel(
     in_out_argnames=None,
     module_preload_mode=ModulePreloadMode.CURRENT_DEVICE,
     enable_backward: bool = False,
+    has_side_effect: bool = False,
 ):
     """Create a JAX callback from a Warp kernel.
 
@@ -757,21 +1150,23 @@ def jax_kernel(
     Args:
         kernel: The Warp kernel to launch.
         num_outputs: Specify the number of output arguments if greater than 1.
-                     This must include the number of ``in_out_arguments``.
+            This must include the number of ``in_out_arguments``.
         vmap_method: String specifying how the callback transforms under ``vmap()``.
-                     This argument can also be specified for individual calls.
+            This argument can also be specified for individual calls.
         launch_dims: Specify the default kernel launch dimensions. If None, launch
-                     dimensions are inferred from the shape of the first array argument.
-                     This argument can also be specified for individual calls.
+            dimensions are inferred from the shape of the first array argument.
+            This argument can also be specified for individual calls.
         output_dims: Specify the default dimensions of output arrays.  If None, output
-                     dimensions are inferred from the launch dimensions.
-                     This argument can also be specified for individual calls.
+            dimensions are inferred from the launch dimensions.
+            This argument can also be specified for individual calls.
         in_out_argnames: Names of arguments that are both inputs and outputs (aliased buffers).
             These must be array arguments that appear before any pure output arguments in the
             kernel signature. The number of in-out arguments is included in ``num_outputs``.
             Not supported when ``enable_backward=True``.
         module_preload_mode: Specify the devices where the module should be preloaded.
         enable_backward: Enable automatic differentiation for this kernel.
+        has_side_effect: Whether the custom call has side effects. When True,
+            the FFI call will be executed even when the outputs are not used.
 
     Limitations:
         - All kernel arguments must be contiguous arrays or scalars.
@@ -783,21 +1178,41 @@ def jax_kernel(
 
     check_jax_version()
 
+    if isinstance(output_dims, dict):
+        hashable_output_dims = tuple(sorted(output_dims.items()))
+    elif hasattr(output_dims, "__len__"):
+        hashable_output_dims = tuple(output_dims)
+    else:
+        hashable_output_dims = output_dims
+
+    if hasattr(launch_dims, "__len__"):
+        hashable_launch_dims = tuple(launch_dims)
+    else:
+        hashable_launch_dims = launch_dims
+
     if not enable_backward:
         key = (
             kernel.func,
             kernel.sig,
             num_outputs,
             vmap_method,
-            tuple(launch_dims) if launch_dims else launch_dims,
-            tuple(sorted(output_dims.items())) if output_dims else output_dims,
+            hashable_launch_dims,
+            hashable_output_dims,
             module_preload_mode,
+            has_side_effect,
         )
 
         with _FFI_REGISTRY_LOCK:
             if key not in _FFI_KERNEL_REGISTRY:
                 new_kernel = FfiKernel(
-                    kernel, num_outputs, vmap_method, launch_dims, output_dims, in_out_argnames, module_preload_mode
+                    kernel,
+                    num_outputs,
+                    vmap_method,
+                    launch_dims,
+                    output_dims,
+                    in_out_argnames,
+                    module_preload_mode,
+                    has_side_effect=has_side_effect,
                 )
                 _FFI_KERNEL_REGISTRY[key] = new_kernel
 
@@ -827,7 +1242,7 @@ def jax_kernel(
     static_args = []
     for i, p in enumerate(parameters[:num_inputs]):
         param_type = p.annotation
-        if not isinstance(param_type, wp.array):
+        if not matches_array_class(param_type, wp.array):
             if param_type in wp._src.types.value_types:
                 static_args.append(i)
             else:
@@ -837,7 +1252,7 @@ def jax_kernel(
         # determine launch dimensions from the shape of the first input array
         for i, p in enumerate(parameters[:num_inputs]):
             param_type = p.annotation
-            if isinstance(param_type, wp.array):
+            if matches_array_class(param_type, wp.array):
                 arg = call_args[i]
                 arg_shape = tuple(arg.shape)
                 if hasattr(param_type.dtype, "_wp_scalar_type_"):
@@ -857,7 +1272,13 @@ def jax_kernel(
     fwd_kernel_wrapper.__annotations__ = {p.name: p.annotation for p in parameters}
     fwd_kernel_wrapper.__annotations__["return"] = None
 
-    jax_fwd_kernel = jax_callable(fwd_kernel_wrapper, num_outputs=num_outputs, vmap_method=vmap_method)
+    jax_fwd_kernel = jax_callable(
+        fwd_kernel_wrapper,
+        num_outputs=num_outputs,
+        vmap_method=vmap_method,
+        module_preload_mode=module_preload_mode,
+        has_side_effect=has_side_effect,
+    )
 
     # backward arguments only include static args once
     bwd_arg_count = 2 * parameter_count - len(static_args)
@@ -939,6 +1360,8 @@ def jax_kernel(
         bwd_kernel_wrapper,
         num_outputs=len(bwd_input_params) - len(static_args),
         vmap_method=vmap_method,
+        module_preload_mode=module_preload_mode,
+        has_side_effect=has_side_effect,
     )
 
     differentiable_input_indices = [i for i in range(num_inputs) if i not in static_args]
@@ -985,7 +1408,7 @@ def jax_kernel(
             if ann is None:
                 continue
             # Check if annotation is a warp array type (annotation is an instance of wp.array)
-            is_array_ann = isinstance(ann, wp.array)
+            is_array_ann = matches_array_class(ann, wp.array)
             if not is_array_ann:
                 continue
             dtype_ndim = 0
@@ -1009,6 +1432,15 @@ def jax_kernel(
     jax_func = jax.custom_vjp(jax_fwd_kernel, nondiff_argnums=tuple(static_args))
     jax_func.defvjp(fwd_function, bwd_function)
 
+    key = (
+        kernel.func,
+        kernel.sig,
+        num_outputs,
+        vmap_method,
+        module_preload_mode,
+        has_side_effect,
+    )
+
     if static_args:
         static_names = [parameters[i].name for i in static_args]
 
@@ -1018,7 +1450,7 @@ def jax_kernel(
         _user_callable.__signature__ = signature
 
         # Cache differentiable wrapper
-        key = (kernel.func, kernel.sig, num_outputs, vmap_method, tuple(sorted(static_names)))
+        key = (*key, tuple(sorted(static_names)))
         with _FFI_REGISTRY_LOCK:
             cached = _FFI_DIFF_KERNEL_REGISTRY.get(key)
             if cached is None:
@@ -1027,7 +1459,7 @@ def jax_kernel(
         return _FFI_DIFF_KERNEL_REGISTRY[key]
 
     # Cache differentiable wrapper (no static args)
-    key = (kernel.func, kernel.sig, num_outputs, vmap_method, ())
+    key = (*key, ())
     with _FFI_REGISTRY_LOCK:
         cached = _FFI_DIFF_KERNEL_REGISTRY.get(key)
         if cached is None:
@@ -1039,13 +1471,15 @@ def jax_kernel(
 def jax_callable(
     func: Callable,
     num_outputs: int = 1,
-    graph_compatible: Optional[bool] = None,  # deprecated
     graph_mode: GraphMode = GraphMode.JAX,
-    vmap_method: Optional[str] = "broadcast_all",
+    vmap_method: str | None = "broadcast_all",
     output_dims=None,
     in_out_argnames=None,
+    stage_in_argnames=None,
+    stage_out_argnames=None,
     graph_cache_max: int | None = None,
     module_preload_mode: ModulePreloadMode = ModulePreloadMode.CURRENT_DEVICE,
+    has_side_effect: bool = False,
 ):
     """Create a JAX callback from an annotated Python function.
 
@@ -1057,8 +1491,6 @@ def jax_callable(
         func: The Python function to call.
         num_outputs: Specify the number of output arguments if greater than 1.
             This must include the number of ``in_out_arguments``.
-        graph_compatible: Whether the function can be called during CUDA graph capture.
-            This argument is deprecated, use ``graph_mode`` instead.
         graph_mode: CUDA graph capture mode.
             ``GraphMode.JAX`` (default): Let JAX capture the graph, which may be used as a subgraph in an enclosing JAX capture.
             ``GraphMode.WARP``: Let Warp capture the graph. Use this mode when the callable cannot be used as a subgraph,
@@ -1073,9 +1505,15 @@ def jax_callable(
         in_out_argnames: Names of arguments that are both inputs and outputs (aliased buffers).
             These must be array arguments that appear before any pure output arguments in the
             function signature. The number of in-out arguments is included in ``num_outputs``.
+        stage_in_argnames: Names of input arguments that need to be copied with ``GraphMode.WARP_STAGED*``.
+            If ``None``, copy all input arguments.
+        stage_out_argnames: Names of output arguments that need to be copied with ``GraphMode.WARP_STAGED*``.
+            If ``None``, copy all output arguments.
         graph_cache_max: Maximum number of cached graphs captured using ``GraphMode.WARP``.
             If ``None``, use ``warp.jax_experimental.get_jax_callable_default_graph_cache_max()``.
         module_preload_mode: Specify the devices where the module should be preloaded.
+        has_side_effect: Whether the custom call has side effects. When True,
+            the FFI call will be executed even when the outputs are not used.
 
     Limitations:
         - All kernel arguments must be contiguous arrays or scalars.
@@ -1087,17 +1525,15 @@ def jax_callable(
 
     check_jax_version()
 
-    if graph_compatible is not None:
-        wp._src.utils.warn(
-            "The `graph_compatible` argument is deprecated, use `graph_mode` instead.",
-            DeprecationWarning,
-            stacklevel=3,
-        )
-        if graph_compatible is False:
-            graph_mode = GraphMode.NONE
-
     if graph_cache_max is None:
         graph_cache_max = FfiCallable.default_graph_cache_max
+
+    if isinstance(output_dims, dict):
+        hashable_output_dims = tuple(sorted(output_dims.items()))
+    elif hasattr(output_dims, "__len__"):
+        hashable_output_dims = tuple(output_dims)
+    else:
+        hashable_output_dims = output_dims
 
     # Note: we don't include graph_cache_max in the key, it is applied below.
     key = (
@@ -1105,8 +1541,9 @@ def jax_callable(
         num_outputs,
         graph_mode,
         vmap_method,
-        tuple(sorted(output_dims.items())) if output_dims else output_dims,
+        hashable_output_dims,
         module_preload_mode,
+        has_side_effect,
     )
 
     with _FFI_REGISTRY_LOCK:
@@ -1119,8 +1556,11 @@ def jax_callable(
                 vmap_method,
                 output_dims,
                 in_out_argnames,
+                stage_in_argnames,
+                stage_out_argnames,
                 graph_cache_max,
                 module_preload_mode,
+                has_side_effect,
             )
             _FFI_CALLABLE_REGISTRY[key] = callable
         else:

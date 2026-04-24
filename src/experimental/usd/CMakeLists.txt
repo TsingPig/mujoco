@@ -13,6 +13,7 @@
 # limitations under the License.
 
 # --- Global Configuration ---
+
 # Plugin target names (used for library and plugInfo.json)
 set(MJCF_PLUGIN_TARGET_NAME usdMjcf)
 set(MJC_PHYSICS_PLUGIN_TARGET_NAME mjcPhysics)
@@ -126,6 +127,10 @@ add_library(${MJC_PHYSICS_PLUGIN_TARGET_NAME} SHARED)
 target_sources(${MJC_PHYSICS_PLUGIN_TARGET_NAME} PRIVATE
   mjcPhysics/actuator.cpp
   mjcPhysics/collisionAPI.cpp
+  mjcPhysics/equalityAPI.cpp
+  mjcPhysics/equalityConnectAPI.cpp
+  mjcPhysics/equalityJointAPI.cpp
+  mjcPhysics/equalityWeldAPI.cpp
   mjcPhysics/imageableAPI.cpp
   mjcPhysics/jointAPI.cpp
   mjcPhysics/keyframe.cpp
@@ -147,12 +152,7 @@ target_include_directories(${MJC_PHYSICS_PLUGIN_TARGET_NAME} PUBLIC
 ## ----- mujoco USD utils -----
 
 target_sources(mujoco PRIVATE
-  kinematic_tree.cc
-  kinematic_tree.h
   layer_sink.cc
-  material_parsing.cc
-  material_parsing.h
-  usd_to_mjspec.cc
   utils.cc
   writer.cc
 )
@@ -166,19 +166,19 @@ target_compile_options(
 
 # Configure RPATH for macOS and UNIX.
 if(APPLE)
-  set_target_properties($(MJCF_PLUGIN_TARGET_NAME) PROPERTIES
+  set_target_properties(${MJCF_PLUGIN_TARGET_NAME} PROPERTIES
     BUILD_RPATH "${USD_INSTALL_ROOT}"
     INSTALL_RPATH "@loader_path")
 
-  set_target_properties($(MJC_PHYSICS_PLUGIN_TARGET_NAME) PROPERTIES
+  set_target_properties(${MJC_PHYSICS_PLUGIN_TARGET_NAME} PROPERTIES
     BUILD_RPATH "${USD_INSTALL_ROOT}"
     INSTALL_RPATH "@loader_path")
 elseif(UNIX)
-  set_target_properties($(MJCF_PLUGIN_TARGET_NAME) PROPERTIES
+  set_target_properties(${MJCF_PLUGIN_TARGET_NAME} PROPERTIES
     BUILD_RPATH "${USD_INSTALL_ROOT}"
     INSTALL_RPATH "$ORIGIN")
 
-  set_target_properties($(MJC_PHYSICS_PLUGIN_TARGET_NAME) PROPERTIES
+  set_target_properties(${MJC_PHYSICS_PLUGIN_TARGET_NAME} PROPERTIES
     BUILD_RPATH "${USD_INSTALL_ROOT}"
     INSTALL_RPATH "$ORIGIN")
 endif()

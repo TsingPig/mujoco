@@ -31,7 +31,6 @@
 namespace mujoco {
 namespace {
 
-using ::testing::DoubleNear;
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::IsNull;
@@ -168,8 +167,8 @@ TEST_F(UserModelTest, SameFrame) {
 
   // expect them to be equal
   constexpr double eps = 1e-6;
-  EXPECT_THAT(geom_xpos, Pointwise(DoubleNear(eps), geom_xpos2));
-  EXPECT_THAT(geom_xmat, Pointwise(DoubleNear(eps), geom_xmat2));
+  EXPECT_THAT(geom_xpos, Pointwise(MjNear(eps, eps), geom_xpos2));
+  EXPECT_THAT(geom_xmat, Pointwise(MjNear(eps, eps), geom_xmat2));
 
   mj_deleteData(data);
   mj_deleteModel(model);
@@ -196,6 +195,48 @@ TEST_F(UserModelTest, ActuatorSparsity) {
   )";
   mjModel* m = LoadModelFromString(xml);
   ASSERT_EQ(m->nJmom, 2);
+  mj_deleteModel(m);
+}
+
+TEST_F(UserModelTest, FixedTendonSparsity) {
+  static constexpr char xml[] = R"(
+  <mujoco>
+    <worldbody>
+      <body>
+        <geom size=".1"/>
+        <joint name="0"/>
+      </body>
+      <body pos="1 0 0">
+        <geom size=".1"/>
+        <joint name="1"/>
+      </body>
+      <body pos="2 0 0">
+        <geom size=".1"/>
+        <joint name="2"/>
+      </body>
+    </worldbody>
+
+    <tendon>
+      <fixed>
+        <joint coef="3" joint="2"/>
+        <joint coef="2" joint="1"/>
+        <joint coef="1" joint="0"/>
+      </fixed>
+    </tendon>
+  </mujoco>
+  )";
+  mjModel* m = LoadModelFromString(xml);
+  ASSERT_THAT(m, NotNull());
+
+  EXPECT_EQ(m->nJten, 3);
+  EXPECT_EQ(m->ten_J_rownnz[0], 3);
+  EXPECT_EQ(m->ten_J_rowadr[0], 0);
+  EXPECT_EQ(m->wrap_type[m->tendon_adr[0]], mjWRAP_JOINT);
+
+  int rowadr = m->ten_J_rowadr[0];
+  int* colind = m->ten_J_colind + rowadr;
+  EXPECT_THAT(std::vector<int>(colind, colind + 3), ElementsAre(0, 1, 2));
+
   mj_deleteModel(m);
 }
 
@@ -564,7 +605,7 @@ TEST_F(FuseStaticTest, FuseStaticEquivalent) {
   mj_step(m_fuse, d_fuse);
   mj_step(m_no_fuse, d_no_fuse);
 
-  EXPECT_THAT(d_fuse->qvel[0], DoubleNear(d_no_fuse->qvel[0], 2e-17))
+  EXPECT_NEAR(d_fuse->qvel[0], d_no_fuse->qvel[0], MjTol(2e-17, 1e-8))
       << "Velocity should be the same after 1 step";
   EXPECT_NE(d_fuse->qvel[0], 0);
 
@@ -665,6 +706,53 @@ TEST_F(FuseStaticTest, FuseStaticForceSensorReferencedBody) {
   mjModel* m = LoadModelFromString(xml_template, error.data(), error.size());
   ASSERT_THAT(m, NotNull()) << error.data();
   EXPECT_EQ(m->nbody, 3) << "Expecting a world body and two others";
+  mj_deleteModel(m);
+}
+
+TEST_F(FuseStaticTest, FuseStaticCameraInBody) {
+  static constexpr char xml[] = R"(
+  <mujoco>
+    <compiler fusestatic="true"/>
+    <worldbody>
+      <body>
+        <joint axis="1 0 0"/>
+        <geom size="0.5"/>
+        <body pos="1 0 0">
+          <site name="site1"/>
+          <camera name="cam1"/>
+        </body>
+      </body>
+    </worldbody>
+  </mujoco>
+  )";
+  std::array<char, 1024> error;
+  mjModel* m = LoadModelFromString(xml, error.data(), error.size());
+  ASSERT_THAT(m, NotNull()) << error.data();
+  EXPECT_EQ(m->nbody, 2) << "Static body should be fused";
+  EXPECT_EQ(m->ncam, 1);
+  mj_deleteModel(m);
+}
+
+TEST_F(FuseStaticTest, FuseStaticLightInBody) {
+  static constexpr char xml[] = R"(
+  <mujoco>
+    <compiler fusestatic="true"/>
+    <worldbody>
+      <body>
+        <joint axis="1 0 0"/>
+        <geom size="0.5"/>
+        <body pos="1 0 0">
+          <light name="light1" dir="0 0 -1"/>
+        </body>
+      </body>
+    </worldbody>
+  </mujoco>
+  )";
+  std::array<char, 1024> error;
+  mjModel* m = LoadModelFromString(xml, error.data(), error.size());
+  ASSERT_THAT(m, NotNull()) << error.data();
+  EXPECT_EQ(m->nbody, 2) << "Static body should be fused";
+  EXPECT_EQ(m->nlight, 1);
   mj_deleteModel(m);
 }
 
@@ -798,9 +886,8 @@ TEST_F(LengthRangeTest, LengthRangeThreading) {
   EXPECT_THAT(model1, NotNull()) << error;
 
   // model is such that the lengthrange for first actuator is [1, sqrt(5)]
-  EXPECT_THAT(model1->actuator_lengthrange[0], DoubleNear(1.0, 1e-3));
-  EXPECT_THAT(model1->actuator_lengthrange[1],
-              DoubleNear(std::sqrt(5.0), 1e-3));
+  EXPECT_NEAR(model1->actuator_lengthrange[0], 1.0, 1e-3);
+  EXPECT_NEAR(model1->actuator_lengthrange[1], std::sqrt(5.0), 1e-3);
 
   // recompile without threads
   ASSERT_EQ(spec->compiler.usethread, 1);
@@ -973,6 +1060,48 @@ TEST_F(MujocoTest, ConvertSpringdamper) {
   EXPECT_THAT(str.data(), HasSubstr("damping"));
   EXPECT_THAT(str.data(), HasSubstr("stiffness"));
   mj_deleteModel(model);
+  mj_deleteSpec(spec);
+}
+
+// ------------- test history buffer computation -------------------------------
+
+using DelayBufferTest = MujocoTest;
+
+TEST_F(DelayBufferTest, ActuatorDelayBufferSizes) {
+  static constexpr char xml[] = R"(
+  <mujoco>
+    <option timestep="1"/>
+    <worldbody>
+      <body>
+        <geom size="1"/>
+        <joint name="jnt1"/>
+        <joint name="jnt2"/>
+        <joint name="jnt3"/>
+      </body>
+    </worldbody>
+    <actuator>
+      <motor joint="jnt1"/>
+      <motor joint="jnt2" delay="3" nsample="3"/>
+      <motor joint="jnt3" delay="10" nsample="10"/>
+    </actuator>
+  </mujoco>
+  )";
+  mjModel* m = LoadModelFromString(xml);
+  ASSERT_THAT(m, NotNull());
+  ASSERT_EQ(m->nu, 3);
+
+  // nhistory = (2+2*3) + (2+2*10) = 8 + 22 = 30
+  EXPECT_EQ(m->nhistory, 30);
+
+  // verify per-actuator delay and addresses
+  EXPECT_EQ(m->actuator_history[0], 0);
+  EXPECT_EQ(m->actuator_history[2], 3);
+  EXPECT_EQ(m->actuator_history[4], 10);
+  EXPECT_EQ(m->actuator_historyadr[0], -1);
+  EXPECT_EQ(m->actuator_historyadr[1], 0);
+  EXPECT_EQ(m->actuator_historyadr[2], 8);
+
+  mj_deleteModel(m);
 }
 
 }  // namespace

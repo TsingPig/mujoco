@@ -276,15 +276,15 @@ def _contact_groups(m: Model, d: Data) -> Dict[FunctionKey, Contact]:
       # pair contacts get their params from m.pair_* fields
       params.append((
           m.pair_margin[ip] - m.pair_gap[ip],
-          jp.clip(m.pair_friction[ip], a_min=eps),
+          jp.clip(m.pair_friction[ip], min=eps),
           m.pair_solref[ip],
           m.pair_solreffriction[ip],
           m.pair_solimp[ip],
       ))
     if geom1.size > 0 and geom2.size > 0:
       # other contacts get their params from geom fields
-      margin = jp.maximum(m.geom_margin[geom1], m.geom_margin[geom2])
-      gap = jp.maximum(m.geom_gap[geom1], m.geom_gap[geom2])
+      margin = m.geom_margin[geom1] + m.geom_margin[geom2]
+      gap = m.geom_gap[geom1] + m.geom_gap[geom2]
       solmix1, solmix2 = m.geom_solmix[geom1], m.geom_solmix[geom2]
       mix = solmix1 / (solmix1 + solmix2)
       mix = jp.where((solmix1 < eps) & (solmix2 < eps), 0.5, mix)
@@ -349,8 +349,8 @@ def make_condim(
     m: Union[Model, mujoco.MjModel], impl: Impl = Impl.JAX
 ) -> np.ndarray:
   """Returns the dims of the contacts for a Model."""
-  if impl not in (Impl.JAX, Impl.C):
-    raise ValueError('make_condim only supports JAX and C backends.')
+  if impl != Impl.JAX:
+    raise ValueError('make_condim only supports JAX backend.')
 
   if isinstance(m, mujoco.MjModel):
     sdf_initpoints = m.opt.sdf_initpoints
@@ -389,8 +389,6 @@ def make_condim(
       func = _COLLISION_FUNC.get(k.types, None)
       if func is not None:
         ncon = func.ncon  # pytype: disable=attribute-error
-      elif impl == Impl.C:
-        ncon = _MAX_NCON
       else:
         raise ValueError(
             f'Collision function not found for geom types {k.types[0]},',

@@ -15,6 +15,7 @@
 // Tests for engine/engine_util_solve.c.
 
 #include <array>
+#include <vector>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -22,6 +23,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <gtest/gtest-spi.h>
 #include <mujoco/mjdata.h>
 #include <mujoco/mujoco.h>
 #include "src/engine/engine_util_misc.h"
@@ -30,7 +32,6 @@
 namespace mujoco {
 namespace {
 
-using ::testing::DoubleNear;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::HasSubstr;
@@ -66,21 +67,22 @@ TEST_F(UtilMiscTest, Sigmoid) {
   EXPECT_EQ(mju_sigmoid(2),   1);
 
   // epsilon for finite-differencing
-  const mjtNum dx = 1e-7;
+  constexpr mjtNum dx = MjTol(1e-7, 1e-3);
+  constexpr mjtNum fd_tol = MjTol(1e-7, 1e-3);
 
   // derivative at 0
   mjtNum dy_dx_0 = (mju_sigmoid(0 + dx) - mju_sigmoid(0)) / dx;
-  EXPECT_THAT(dy_dx_0, DoubleNear(0, dx));
+  EXPECT_NEAR(dy_dx_0, 0, fd_tol);
 
   // derivative at 1
   mjtNum dy_dx_1 = (mju_sigmoid(1) - mju_sigmoid(1 - dx)) / dx;
-  EXPECT_THAT(dy_dx_1, DoubleNear(0, dx));
+  EXPECT_NEAR(dy_dx_1, 0, fd_tol);
 
   // derivative at 0.5
   const mjtNum x = 0.5;
   mjtNum dy_dx_0p5 = (mju_sigmoid(x + dx) - mju_sigmoid(x - dx)) / (2*dx);
   mjtNum expected = 30*x*x*x*x - 60*x*x*x + 30*x*x;
-  EXPECT_THAT(dy_dx_0p5, DoubleNear(expected, dx));
+  EXPECT_NEAR(dy_dx_0p5, expected, fd_tol);
 }
 
 TEST_F(UtilMiscTest, SphereWrap) {
@@ -428,11 +430,88 @@ TEST_F(InterpolationTest, mju_interpolate3D) {
     expected[0] = quadratic_function_1(sample[0], sample[1], sample[2]);
     expected[1] = quadratic_function_2(sample[0], sample[1], sample[2]);
     expected[2] = quadratic_function_3(sample[0], sample[1], sample[2]);
-    mju_interpolate3D(res, sample, coeff, order);
-    EXPECT_NEAR(res[0], expected[0], 1e-10);
-    EXPECT_NEAR(res[1], expected[1], 1e-10);
-    EXPECT_NEAR(res[2], expected[2], 1e-10);
+    mju_interpolate3D(res, sample, coeff, order, NULL);
+    EXPECT_NEAR(res[0], expected[0], MjTol(1e-10, 1e-5));
+    EXPECT_NEAR(res[1], expected[1], MjTol(1e-10, 1e-5));
+    EXPECT_NEAR(res[2], expected[2], MjTol(1e-10, 1e-5));
   }
+}
+
+TEST_F(InterpolationTest, mju_cellLookup_SingleCell) {
+  // single cell (1x1x1): local coords should equal global coords
+  int cellnum[3] = {1, 1, 1};
+  mjtNum coord[3] = {0.3, 0.7, 0.5};
+  mjtNum local[3];
+  int nodeindices[8];
+
+  int npc = mju_cellLookup(coord, cellnum, 1, local, nodeindices);
+  EXPECT_EQ(npc, 8);
+  EXPECT_NEAR(local[0], 0.3, MjTol(1e-12, 1e-6));
+  EXPECT_NEAR(local[1], 0.7, MjTol(1e-12, 1e-6));
+  EXPECT_NEAR(local[2], 0.5, MjTol(1e-12, 1e-6));
+
+  // for trilinear 1x1x1: nodes are 0..7 in lexicographic order
+  for (int i = 0; i < 8; i++) {
+    EXPECT_EQ(nodeindices[i], i);
+  }
+}
+
+TEST_F(InterpolationTest, mju_cellLookup_MultiCell) {
+  // 2x3x4 grid, trilinear: 3x4x5 = 60 nodes
+  int cellnum[3] = {2, 3, 4};
+  int order = 1;
+  int ny_g = 3*1 + 1;  // 4
+  int nz_g = 4*1 + 1;  // 5
+
+  // point at (0.75, 0.5, 0.125) -> cell (1, 1, 0)
+  mjtNum coord[3] = {0.75, 0.5, 0.125};
+  mjtNum local[3];
+  int nodeindices[8];
+
+  int npc = mju_cellLookup(coord, cellnum, order, local, nodeindices);
+  EXPECT_EQ(npc, 8);
+
+  // cell (1,1,0): local = (0.75*2 - 1, 0.5*3 - 1, 0.125*4 - 0)
+  EXPECT_NEAR(local[0], 0.5, 1e-12);
+  EXPECT_NEAR(local[1], 0.5, 1e-12);
+  EXPECT_NEAR(local[2], 0.5, 1e-12);
+
+  // expected node indices for cell (1,1,0), trilinear:
+  //   (gi, gj, gk) for li,lj,lk in {0,1}
+  //   gi = 1+li, gj = 1+lj, gk = 0+lk
+  //   gidx = gi*ny_g*nz_g + gj*nz_g + gk
+  int expected[8];
+  int ni = 0;
+  for (int li = 0; li <= 1; li++) {
+    for (int lj = 0; lj <= 1; lj++) {
+      for (int lk = 0; lk <= 1; lk++) {
+        expected[ni++] = (1+li)*ny_g*nz_g + (1+lj)*nz_g + lk;
+      }
+    }
+  }
+  for (int i = 0; i < 8; i++) {
+    EXPECT_EQ(nodeindices[i], expected[i]);
+  }
+}
+
+TEST_F(InterpolationTest, mju_cellLookup_Boundary) {
+  // point exactly at coord=1.0 should clamp to last cell
+  int cellnum[3] = {3, 3, 3};
+  mjtNum coord[3] = {1.0, 1.0, 1.0};
+  mjtNum local[3];
+
+  mju_cellLookup(coord, cellnum, 1, local, NULL);
+  // cell (2,2,2), local = (1*3 - 2, 1*3 - 2, 1*3 - 2) = (1, 1, 1)
+  EXPECT_NEAR(local[0], 1.0, 1e-12);
+  EXPECT_NEAR(local[1], 1.0, 1e-12);
+  EXPECT_NEAR(local[2], 1.0, 1e-12);
+
+  // point at coord=0.0 should map to first cell
+  mjtNum coord0[3] = {0.0, 0.0, 0.0};
+  mju_cellLookup(coord0, cellnum, 1, local, NULL);
+  EXPECT_NEAR(local[0], 0.0, 1e-12);
+  EXPECT_NEAR(local[1], 0.0, 1e-12);
+  EXPECT_NEAR(local[2], 0.0, 1e-12);
 }
 
 TEST_F(InterpolationTest, mju_defGradient) {
@@ -482,9 +561,9 @@ TEST_F(InterpolationTest, mju_defGradient) {
     mju_rotVecQuat(dof5 + 3*i, dof0 + 3*i, quat);
   }
   mju_defGradient(mat, p1, dof5, order);
-  EXPECT_THAT(mat, Pointwise(DoubleNear(1e-8), {0, -1, 0, 1, 0, 0, 0, 0, 1}));
+  EXPECT_THAT(mat, Pointwise(MjNear(1e-8, 1e-6), {0, -1, 0, 1, 0, 0, 0, 0, 1}));
   mju_defGradient(mat, p2, dof5, order);
-  EXPECT_THAT(mat, Pointwise(DoubleNear(1e-8), {0, -1, 0, 1, 0, 0, 0, 0, 1}));
+  EXPECT_THAT(mat, Pointwise(MjNear(1e-8, 1e-6), {0, -1, 0, 1, 0, 0, 0, 0, 1}));
 
   // z-axis 30 degree rotation
   mjtNum dof6[24];
@@ -497,9 +576,9 @@ TEST_F(InterpolationTest, mju_defGradient) {
     mju_quat2Mat(rot6, quat);
   }
   mju_defGradient(mat, p1, dof6, order);
-  EXPECT_THAT(mat, Pointwise(DoubleNear(1e-8), rot6));
+  EXPECT_THAT(mat, Pointwise(MjNear(1e-8, 1e-6), rot6));
   mju_defGradient(mat, p2, dof6, order);
-  EXPECT_THAT(mat, Pointwise(DoubleNear(1e-8), rot6));
+  EXPECT_THAT(mat, Pointwise(MjNear(1e-8, 1e-6), rot6));
 
   // z-axis CoM rotation
   mjtNum dof7[24];
@@ -514,12 +593,53 @@ TEST_F(InterpolationTest, mju_defGradient) {
     mju_quat2Mat(rot7, quat);
   }
   mju_defGradient(mat, p1, dof7, order);
-  EXPECT_THAT(mat, Pointwise(DoubleNear(1e-8), rot7));
+  EXPECT_THAT(mat, Pointwise(MjNear(1e-8, 1e-6), rot7));
   mju_defGradient(mat, p2, dof7, order);
-  EXPECT_THAT(mat, Pointwise(DoubleNear(1e-8), rot7));
+  EXPECT_THAT(mat, Pointwise(MjNear(1e-8, 1e-6), rot7));
 }
 
-// --------------------------------- Base64 ------------------------------------
+TEST_F(InterpolationTest, mju_flexInterpState_MultiCell) {
+  int order = 1;  // trilinear
+  int cy = 2;
+  int cz = 2;
+  int nodenum = 27;  // 3x3x3
+
+  std::vector<mjtNum> xpos(3 * nodenum);
+  mjtNum quat[4];
+
+  // Populate xpos directly for a grid centered at origin, rotated 90 deg around
+  // Z Original grid points: {-0.1, 0.0, 0.1}^3 Rotated: (x, y, z) -> (-y, x, z)
+  int idx = 0;
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 3; j++) {
+      for (int k = 0; k < 3; k++) {
+        mjtNum x = (i - 1) * 0.1;
+        mjtNum y = (j - 1) * 0.1;
+        mjtNum z = (k - 1) * 0.1;
+
+        // Apply rotation
+        xpos[3*idx + 0] = -y;
+        xpos[3*idx + 1] = x;
+        xpos[3*idx + 2] = z;
+        idx++;
+      }
+    }
+  }
+
+  int npc = (order+1)*(order+1)*(order+1);
+  std::vector<mjtNum> xpos_c(3 * npc);
+
+  mju_flexGatherCellState(order, cy, cz, 0, 0, 0, xpos.data(), NULL, NULL,
+                          xpos_c.data(), NULL, NULL, NULL, quat);
+
+  // Expected quaternion for -90 deg around Z (global to local):
+  // [sqrt(0.5), 0, 0, -sqrt(0.5)]
+  mjtNum expected_val = mju_sqrt(0.5);
+  EXPECT_NEAR(quat[0], expected_val, 1e-5);
+  EXPECT_NEAR(quat[1], 0.0, 1e-5);
+  EXPECT_NEAR(quat[2], 0.0, 1e-5);
+  EXPECT_NEAR(quat[3], -expected_val, 1e-5);
+}
 
 using Base64Test = MujocoTest;
 
@@ -720,6 +840,329 @@ TEST_F(Base64Test, decodeAndEncode) {
   mju_encodeBase64(buffer2.data(), buffer1.data(), buffer1.size());
 
   EXPECT_THAT(buffer2.data(), StrEq(s));
+}
+
+// --------------------------------- History Buffers ---------------------------
+
+using HistoryTest = MujocoTest;
+
+// buffer layout: [user(1), cursor(1), times(n), values(n*dim)]
+// cursor points to newest element (logical index n-1)
+// after init, cursor=n-1, so physical indices equal logical indices
+
+TEST_F(HistoryTest, Init) {
+  constexpr int n = 4;
+  constexpr int dim = 1;
+  mjtNum buf[2 + n + n*dim];
+
+  std::vector<mjtNum> times = {4, 6, 8, 10};
+  std::vector<mjtNum> values = {99, 99, 99, 99};
+  mju_historyInit(buf, n, dim, times.data(), values.data(), 0.0);
+
+  // check header
+  EXPECT_EQ(buf[0], 0.0);  // user
+  EXPECT_EQ(buf[1], static_cast<mjtNum>(n-1));  // cursor = n-1
+
+  // timestamps: [4, 6, 8, 10] (t=10 is newest)
+  // values: [99, 99, 99, 99]
+  // verify via read function (logical order)
+  mjtNum res;
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 4.0, 0), 99.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 10.0, 0), 99.0);
+}
+
+TEST_F(HistoryTest, Init_Vector) {
+  constexpr int n = 3;
+  constexpr int dim = 2;
+  mjtNum buf[2 + n + n*dim];
+
+  std::vector<mjtNum> times = {-2, -1, 0};
+  std::vector<mjtNum> values = {1.0, 2.0, 1.0, 2.0, 1.0, 2.0};
+  mju_historyInit(buf, n, dim, times.data(), values.data(), 0.0);
+
+  EXPECT_EQ(buf[1], static_cast<mjtNum>(n-1));  // cursor = n-1
+
+  // verify via read function
+  mjtNum res[dim];
+  const mjtNum* ptr = mju_historyRead(buf, n, dim, res, -2.0, 0);
+  ASSERT_NE(ptr, nullptr);
+  EXPECT_EQ(ptr[0], 1.0);
+  EXPECT_EQ(ptr[1], 2.0);
+}
+
+TEST_F(HistoryTest, Append) {
+  constexpr int n = 4;
+  constexpr int dim = 1;
+  // Initialize buffer properly, then insert
+  mjtNum buf[2 + 2*n];
+  buf[0] = 0.0;
+  buf[1] = n - 1;
+  // timestamps: [4, 6, 8, 10]
+  mjtNum times[] = {4, 6, 8, 10};
+  mju_copy(buf + 2, times, n);
+  // values: [0, 0, 0, 0]
+  mju_zero(buf + 2 + n, n);
+
+  // overwrite with specific values
+  *mju_historyInsert(buf, n, dim, 4.0) = 1.0;
+  *mju_historyInsert(buf, n, dim, 6.0) = 2.0;
+  *mju_historyInsert(buf, n, dim, 8.0) = 3.0;
+  *mju_historyInsert(buf, n, dim, 10.0) = 4.0;
+
+  // now append at t=12
+  *mju_historyInsert(buf, n, dim, 12.0) = 99.0;
+
+  // verify logical order: [6, 8, 10, 12] -> [2, 3, 4, 99]
+  mjtNum res;
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 6.0, 0), 2.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 8.0, 0), 3.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 10.0, 0), 4.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 12.0, 0), 99.0);
+
+  // oldest should now be t=6
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 4.0, 0), 2.0);
+}
+
+TEST_F(HistoryTest, Append_Multiple) {
+  constexpr int n = 3;
+  constexpr int dim = 1;
+  mjtNum buf[2 + 2*n];
+  buf[0] = 0.0;
+  buf[1] = n - 1;
+  mjtNum times[] = {-2, -1, 0};
+  mju_copy(buf + 2, times, n);
+  mju_zero(buf + 2 + n, n);
+
+  for (int i = 1; i <= 4; i++) {
+    mjtNum i_real = static_cast<mjtNum>(i);
+    *mju_historyInsert(buf, n, dim, i_real) = i_real;
+  }
+  // Final: logical timestamps [2, 3, 4], values [2, 3, 4]
+  mjtNum res;
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 2.0, 0), 2.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 3.0, 0), 3.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 4.0, 0), 4.0);
+}
+
+TEST_F(HistoryTest, ReadVector_ExactMatch) {
+  constexpr int n = 3;
+  constexpr int dim = 2;
+  mjtNum buf[2 + n + n*dim];
+  buf[0] = 0.0;
+  buf[1] = n - 1;
+  mjtNum times[] = {0, 1, 2};
+  mju_copy(buf + 2, times, n);
+  mju_zero(buf + 2 + n, n*dim);
+
+  // set values: t=0->(1,2), t=1->(3,4), t=2->(5,6)
+  mjtNum* slot0 = mju_historyInsert(buf, n, dim, 0.0);
+  slot0[0] = 1.0; slot0[1] = 2.0;
+  mjtNum* slot1 = mju_historyInsert(buf, n, dim, 1.0);
+  slot1[0] = 3.0; slot1[1] = 4.0;
+  mjtNum* slot2 = mju_historyInsert(buf, n, dim, 2.0);
+  slot2[0] = 5.0; slot2[1] = 6.0;
+
+  mjtNum res[dim];
+  const mjtNum* ptr = mju_historyRead(buf, n, dim, res, 1.0, 0);
+  ASSERT_NE(ptr, nullptr);
+  EXPECT_EQ(ptr[0], 3.0);
+  EXPECT_EQ(ptr[1], 4.0);
+}
+
+TEST_F(HistoryTest, ReadVector_ZOH) {
+  constexpr int n = 3;
+  constexpr int dim = 2;
+  mjtNum buf[2 + n + n*dim];
+  buf[0] = 0.0;
+  buf[1] = n - 1;
+  mjtNum times[] = {0, 1, 2};
+  mju_copy(buf + 2, times, n);
+  mju_zero(buf + 2 + n, n*dim);
+
+  mjtNum* slot0 = mju_historyInsert(buf, n, dim, 0.0);
+  slot0[0] = 1.0; slot0[1] = 2.0;
+  mjtNum* slot1 = mju_historyInsert(buf, n, dim, 1.0);
+  slot1[0] = 3.0; slot1[1] = 4.0;
+  mjtNum* slot2 = mju_historyInsert(buf, n, dim, 2.0);
+  slot2[0] = 5.0; slot2[1] = 6.0;
+
+  mjtNum res[dim];
+  const mjtNum* ptr = mju_historyRead(buf, n, dim, res, 0.5, 0);
+  ASSERT_NE(ptr, nullptr);
+  EXPECT_EQ(ptr[0], 1.0);
+  EXPECT_EQ(ptr[1], 2.0);
+}
+
+TEST_F(HistoryTest, ReadVector_Linear) {
+  constexpr int n = 3;
+  constexpr int dim = 2;
+  mjtNum buf[2 + n + n*dim];
+  buf[0] = 0.0;
+  buf[1] = n - 1;
+  mjtNum times[] = {0, 1, 2};
+  mju_copy(buf + 2, times, n);
+  mju_zero(buf + 2 + n, n*dim);
+
+  mjtNum* slot0 = mju_historyInsert(buf, n, dim, 0.0);
+  slot0[0] = 1.0; slot0[1] = 2.0;
+  mjtNum* slot1 = mju_historyInsert(buf, n, dim, 1.0);
+  slot1[0] = 3.0; slot1[1] = 4.0;
+  mjtNum* slot2 = mju_historyInsert(buf, n, dim, 2.0);
+  slot2[0] = 5.0; slot2[1] = 6.0;
+
+  mjtNum res[dim];
+  const mjtNum* ptr = mju_historyRead(buf, n, dim, res, 0.5, 1);
+  EXPECT_EQ(ptr, nullptr);
+  EXPECT_NEAR(res[0], 2.0, MjTol(1e-10, 1e-10));  // (1+3)/2
+  EXPECT_NEAR(res[1], 3.0, MjTol(1e-10, 1e-10));  // (2+4)/2
+}
+
+TEST_F(HistoryTest, InsertOutOfOrder) {
+  constexpr int n = 4;
+  constexpr int dim = 1;
+  mjtNum buf[2 + 2*n];
+  mjtNum res;
+
+  auto reset = [&]() {
+    buf[0] = 0.0;
+    buf[1] = n - 1;
+    mjtNum times[] = {4, 6, 8, 10};
+    mju_copy(buf + 2, times, n);
+    mju_zero(buf + 2 + n, n);
+
+    *mju_historyInsert(buf, n, dim, 4.0) = 1.0;
+    *mju_historyInsert(buf, n, dim, 6.0) = 2.0;
+    *mju_historyInsert(buf, n, dim, 8.0) = 3.0;
+    *mju_historyInsert(buf, n, dim, 10.0) = 4.0;
+  };
+
+  // insert in middle (between t=8 and t=10)
+  reset();
+  *mju_historyInsert(buf, n, dim, 9.0) = 99.0;
+  // logical: [6, 8, 9, 10] -> [2, 3, 99, 4]
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 6.0, 0), 2.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 8.0, 0), 3.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 9.0, 0), 99.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 10.0, 0), 4.0);
+
+  // insert near start (between t=4 and t=6)
+  reset();
+  *mju_historyInsert(buf, n, dim, 5.0) = 99.0;
+  // logical: [5, 6, 8, 10] -> [99, 2, 3, 4]
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 5.0, 0), 99.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 6.0, 0), 2.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 8.0, 0), 3.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 10.0, 0), 4.0);
+
+  // insert before oldest (t=3 < t=4): replaces oldest
+  reset();
+  *mju_historyInsert(buf, n, dim, 3.0) = 99.0;
+  // logical: [3, 6, 8, 10] -> [99, 2, 3, 4]
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 3.0, 0), 99.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 6.0, 0), 2.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 8.0, 0), 3.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 10.0, 0), 4.0);
+}
+
+TEST_F(HistoryTest, InsertReplaceOnCollision) {
+  constexpr int n = 4;
+  constexpr int dim = 1;
+  mjtNum buf[2 + 2*n];
+  mjtNum res;
+
+  auto reset = [&]() {
+    // timestamps: [4, 6, 8, 10], values initialized to 0
+    buf[0] = 0.0;
+    buf[1] = n - 1;
+    mjtNum times[] = {4, 6, 8, 10};
+    mju_copy(buf + 2, times, n);
+    mju_zero(buf + 2 + n, n);
+
+    *mju_historyInsert(buf, n, dim, 4.0) = 1.0;
+    *mju_historyInsert(buf, n, dim, 6.0) = 2.0;
+    *mju_historyInsert(buf, n, dim, 8.0) = 3.0;
+    *mju_historyInsert(buf, n, dim, 10.0) = 4.0;
+  };
+
+  // collision in middle (t=8)
+  reset();
+  *mju_historyInsert(buf, n, dim, 8.0) = 99.0;
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 4.0, 0), 1.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 6.0, 0), 2.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 8.0, 0), 99.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 10.0, 0), 4.0);
+
+  // collision at newest (t=10)
+  reset();
+  *mju_historyInsert(buf, n, dim, 10.0) = 99.0;
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 4.0, 0), 1.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 6.0, 0), 2.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 8.0, 0), 3.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 10.0, 0), 99.0);
+
+  // collision at oldest (t=4)
+  reset();
+  *mju_historyInsert(buf, n, dim, 4.0) = 99.0;
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 4.0, 0), 99.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 6.0, 0), 2.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 8.0, 0), 3.0);
+  EXPECT_EQ(*mju_historyRead(buf, n, dim, &res, 10.0, 0), 4.0);
+}
+
+void TriggerHistoryInitNonMonotonic() {
+  mjtNum buf[10];
+  mjtNum times[4] = {1, 2, 2, 4};  // not strictly increasing
+  mjtNum values[4] = {0};
+  mju_historyInit(buf, 4, 1, times, values, 0.0);
+}
+
+TEST_F(HistoryTest, Init_NonMonotonic) {
+  EXPECT_FATAL_FAILURE(TriggerHistoryInitNonMonotonic(),
+                       "mju_historyInit: times must be strictly increasing");
+}
+
+TEST_F(HistoryTest, CubicInterpolation) {
+  int n = 2;
+  int dim = 2;
+  mjtNum buf[100];  // 2 + 2 + 2*2 = 8
+  buf[0] = 0.0;
+  buf[1] = n - 1;
+  mjtNum times[] = {-1, 0};
+  mju_copy(buf + 2, times, n);
+  mju_zero(buf + 2 + n, n*dim);
+
+  // Insert (0, 0, 1) and (1, 1, 0).
+  // Dim 0: 0 -> 1. Spline: p(x) = 3x^2 - 2x^3
+  // Dim 1: 1 -> 0. Spline: p(x) = 1 - 3x^2 + 2x^3
+  mjtNum* slot0 = mju_historyInsert(buf, n, dim, 0.0);
+  slot0[0] = 0.0; slot0[1] = 1.0;
+  mjtNum* slot1 = mju_historyInsert(buf, n, dim, 1.0);
+  slot1[0] = 1.0; slot1[1] = 0.0;
+
+  mjtNum res[2];
+
+  // Test midpoint x=0.5
+  // Dim 0: 0.5
+  // Dim 1: 1 - 0.5 = 0.5
+  mju_historyRead(buf, n, dim, res, 0.5, 2);
+  EXPECT_NEAR(res[0], 0.5, MjTol(1e-9, 1e-9));
+  EXPECT_NEAR(res[1], 0.5, MjTol(1e-9, 1e-9));
+
+  // Test x=0.25
+  // Dim 0: 3*0.25^2 - 2*0.25^3
+  // Dim 1: 1 - (3*0.25^2 - 2*0.25^3)
+  mju_historyRead(buf, n, dim, res, 0.25, 2);
+  mjtNum expected_0_25 = 3*0.25*0.25 - 2*0.25*0.25*0.25;
+  EXPECT_NEAR(res[0], expected_0_25, MjTol(1e-9, 1e-9));
+  EXPECT_NEAR(res[1], 1.0 - expected_0_25, MjTol(1e-9, 1e-9));
+
+  // Test x=0.8
+  // Dim 0: 3*0.8^2 - 2*0.8^3
+  // Dim 1: 1 - (3*0.8^2 - 2*0.8^3)
+  mju_historyRead(buf, n, dim, res, 0.8, 2);
+  mjtNum expected_0_8 = 3*0.8*0.8 - 2*0.8*0.8*0.8;
+  EXPECT_NEAR(res[0], expected_0_8, MjTol(1e-9, 1e-9));
+  EXPECT_NEAR(res[1], 1.0 - expected_0_8, MjTol(1e-9, 1e-9));
 }
 
 }  // namespace

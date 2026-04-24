@@ -265,7 +265,7 @@ typedef struct mjsJoint_ {         // joint specification
   int align;                       // align free joint with body com (mjtAlignFree)
 
   // stiffness
-  double stiffness;                // stiffness coefficient
+  double stiffness[mjNPOLY+1];     // stiffness coefficients
   double springref;                // spring reference value: qpos_spring
   double springdamper[2];          // timeconst, dampratio
 
@@ -280,7 +280,7 @@ typedef struct mjsJoint_ {         // joint specification
 
   // dof properties
   double armature;                 // armature inertia (mass for slider)
-  double damping;                  // damping coefficient
+  double damping[mjNPOLY+1];       // damping coefficients
   double frictionloss;             // friction loss
   mjtNum solref_friction[mjNREF];  // solver reference: dof friction
   mjtNum solimp_friction[mjNIMP];  // solver impedance: dof friction
@@ -375,6 +375,7 @@ typedef struct mjsCamera_ {        // camera specification
   // intrinsics
   mjtProjection proj;              // camera projection type
   int resolution[2];               // resolution (pixel)
+  int output;                      // bit flags for output type
   double fovy;                     // y-field of view
   double ipd;                      // inter-pupillary distance
   float intrinsic[4];              // camera intrinsics (length)
@@ -437,13 +438,13 @@ typedef struct mjsFlex_ {          // flex specification
   // other properties
   int dim;                         // element dimensionality
   double radius;                   // radius around primitive element
+  double size[3];                  // vertex bounding box half sizes in qpos0
   mjtByte internal;                // enable internal collisions
   mjtByte flatskin;                // render flex skin with flat shading
   int selfcollide;                 // mode for flex self collision
-  int vertcollide;                 // mode for vertex collision
   int passive;                     // mode for passive collisions
   int activelayers;                // number of active element layers in 3D
-  int group;                       // group for visualizatioh
+  int group;                       // group for visualization
   double edgestiffness;            // edge stiffness
   double edgedamping;              // edge damping
   float rgba[4];                   // rgba when material is omitted
@@ -453,6 +454,8 @@ typedef struct mjsFlex_ {          // flex specification
   double damping;                  // Rayleigh's damping
   double thickness;                // thickness (2D only)
   int elastic2d;                   // 2D passive forces; 0: none, 1: bending, 2: stretching, 3: both
+  int cellcount[3];                // grid cell count for finite cell method
+  int order;                       // interpolation order (1: trilinear, 2: quadratic)
 
   // mesh properties
   mjStringVec* nodebody;           // node body names
@@ -625,9 +628,9 @@ typedef struct mjsTendon_ {        // tendon specification
   mjsElement* element;             // element type
 
   // stiffness, damping, friction, armature
-  double stiffness;                // stiffness coefficient
+  double stiffness[mjNPOLY+1];     // stiffness coefficients
   double springlength[2];          // spring resting length; {-1, -1}: use qpos_spring
-  double damping;                  // damping coefficient
+  double damping[mjNPOLY+1];       // damping coefficients
   double frictionloss;             // friction loss
   mjtNum solref_friction[mjNREF];  // solver reference: tendon friction
   mjtNum solimp_friction[mjNIMP];  // solver impedance: tendon friction
@@ -685,6 +688,8 @@ typedef struct mjsActuator_ {      // actuator specification
   double cranklength;              // crank length, for slider-crank
   double lengthrange[2];           // transmission length range
   double inheritrange;             // automatic range setting for position and intvelocity
+  double damping[mjNPOLY+1];       // damping coefficients
+  double armature;                 // armature inertia
 
   // input/output clamping
   int ctrllimited;                 // are control limits defined (mjtLimited)
@@ -696,6 +701,9 @@ typedef struct mjsActuator_ {      // actuator specification
 
   // other
   int group;                       // group
+  int nsample;                     // number of samples in history buffer
+  int interp;                      // interpolation order (0=ZOH, 1=linear, 2=cubic)
+  double delay;                    // delay time in seconds; 0: no delay
   mjDoubleVec* userdata;           // user data
   mjsPlugin plugin;                // actuator plugin
   mjString* info;                  // message appended to compiler errors
@@ -721,6 +729,12 @@ typedef struct mjsSensor_ {        // sensor specification
   // output post-processing
   double cutoff;                   // cutoff for real and positive datatypes
   double noise;                    // noise stdev
+
+  // history buffer
+  int nsample;                     // number of samples in history buffer
+  int interp;                      // interpolation order (0=ZOH, 1=linear, 2=cubic)
+  double delay;                    // delay time in seconds
+  double interval[2];              // [period, time_prev] in seconds
 
   // other
   mjDoubleVec* userdata;           // user data

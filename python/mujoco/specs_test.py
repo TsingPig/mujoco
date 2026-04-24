@@ -169,7 +169,7 @@ class SpecsTest(absltest.TestCase):
 
     # Add tendon.
     tendon = spec.add_tendon(stiffness=2, springlength=[0.1, 0.2])
-    self.assertEqual(tendon.stiffness, 2)
+    np.testing.assert_array_equal(tendon.stiffness, [2, 0, 0])
     np.testing.assert_array_equal(tendon.springlength, [0.1, 0.2])
 
     # Add actuator.
@@ -357,12 +357,8 @@ class SpecsTest(absltest.TestCase):
     self.assertEqual(light_in_frame.frame, framea0)
 
     # Invalid input for valid keyword argument.
-    with self.assertRaises(ValueError) as cm:
+    with self.assertRaises(TypeError):
       body.add_geom(pos='pos')
-    self.assertEqual(
-        str(cm.exception),
-        'pos should be a list/array.',
-    )
 
     with self.assertRaises(ValueError) as cm:
       body.add_geom(pos=[0, 1])
@@ -371,32 +367,15 @@ class SpecsTest(absltest.TestCase):
         'pos should be a list/array of size 3.',
     )
 
-    with self.assertRaises(ValueError) as cm:
+    with self.assertRaises(TypeError):
       body.add_geom(type='type')
-    self.assertEqual(
-        str(cm.exception),
-        'type is the wrong type.',
-    )
 
-    with self.assertRaises(ValueError) as cm:
+    with self.assertRaises(TypeError):
       body.add_geom(userdata='')
-    self.assertEqual(
-        str(cm.exception),
-        'userdata has the wrong type.',
-    )
 
     # Invalid keyword argument.
-    with self.assertRaises(TypeError) as cm:
+    with self.assertRaises(TypeError):
       body.add_geom(vel='vel')
-    self.assertEqual(
-        str(cm.exception),
-        'Invalid vel keyword argument. Valid options are: name, type, pos,'
-        ' quat, axisangle, xyaxes, zaxis, euler, fromto, size, contype,'
-        ' conaffinity, condim, priority, friction, solmix, solref, solimp,'
-        ' margin, gap, mass, density, typeinertia, fluid_ellipsoid,'
-        ' fluid_coefs, material, rgba, group, hfieldname, meshname, fitscale,'
-        ' userdata, plugin, info.',
-    )
 
     # Orientation keyword arguments.
     geom_axisangle = body.add_geom(axisangle=[1, 2, 3, 4])
@@ -464,13 +443,49 @@ class SpecsTest(absltest.TestCase):
       body.add_geom(axisangle=[1, 2, 3, 4], euler=[1, 2, 3])
     self.assertEqual(
         str(cm.exception),
-        'Only one of: axisangle, xyaxes, zaxis, oreuler can be set.',
+        'Only one of: axisangle, xyaxes, zaxis, or euler can be set.',
     )
     with self.assertRaises(ValueError) as cm:
       spec.worldbody.add_body(iaxisangle=[1, 2, 3, 4], ieuler=[1, 2, 3])
     self.assertEqual(
         str(cm.exception),
-        'Only one of: iaxisangle, ixyaxes, izaxis, orieuler can be set.',
+        'Only one of: iaxisangle, ixyaxes, izaxis, or ieuler can be set.',
+    )
+
+  def test_size_kwarg_variable_length(self):
+    spec = mujoco.MjSpec()
+    body = spec.worldbody.add_body()
+
+    geom_size1 = body.add_geom(size=[0.5])
+    np.testing.assert_array_equal(geom_size1.size, [0.5, 0, 0])
+
+    geom_size2 = body.add_geom(size=[0.5, 0.3])
+    np.testing.assert_array_equal(geom_size2.size, [0.5, 0.3, 0])
+
+    geom_size3 = body.add_geom(size=[0.5, 0.3, 0.1])
+    np.testing.assert_array_equal(geom_size3.size, [0.5, 0.3, 0.1])
+
+    site_size1 = body.add_site(size=[0.2])
+    np.testing.assert_array_equal(site_size1.size, [0.2, 0, 0])
+
+    site_size2 = body.add_site(size=[0.2, 0.1])
+    np.testing.assert_array_equal(site_size2.size, [0.2, 0.1, 0])
+
+    site_size3 = body.add_site(size=[0.2, 0.1, 0.05])
+    np.testing.assert_array_equal(site_size3.size, [0.2, 0.1, 0.05])
+
+    with self.assertRaises(ValueError) as cm:
+      body.add_geom(size=[])
+    self.assertEqual(
+        str(cm.exception),
+        'size should be a list/array of size 1 to 3.',
+    )
+
+    with self.assertRaises(ValueError) as cm:
+      body.add_geom(size=[1, 2, 3, 4])
+    self.assertEqual(
+        str(cm.exception),
+        'size should be a list/array of size 1 to 3.',
     )
 
   def test_load_xml(self):
@@ -499,6 +514,14 @@ class SpecsTest(absltest.TestCase):
 
     # Check that the state is the same.
     np.testing.assert_array_equal(state1, state2)
+
+  def test_parses_urdf(self):
+    file_path = epath.resource_path("mujoco") / "testdata" / "model.urdf"
+    filename = file_path.as_posix()
+
+    # Load from file.
+    spec1 = mujoco.MjSpec.from_file(filename)
+    self.assertIsNotNone(spec1)
 
   def test_make_mesh(self):
     spec = mujoco.MjSpec()
@@ -929,6 +952,33 @@ class SpecsTest(absltest.TestCase):
       ):
         s.compile()
 
+  def test_geom_and_mesh_plugin(self):
+    """Test that geom.plugin and mesh.plugin are accessible."""
+    spec = mujoco.MjSpec()
+
+    # Verify mesh has plugin attribute
+    mesh = spec.add_mesh(name='test_mesh')
+    self.assertTrue(hasattr(mesh, 'plugin'))
+
+    # Verify geom has plugin attribute
+    body = spec.worldbody.add_body()
+    geom = body.add_geom()
+    self.assertTrue(hasattr(geom, 'plugin'))
+
+    # Verify we can access and modify plugin properties
+    spec.activate_plugin('mujoco.sdf.torus')
+    plugin = spec.add_plugin(name='inst', plugin_name='mujoco.sdf.torus')
+
+    # Assign plugin to geom
+    geom.plugin = plugin
+    self.assertEqual(geom.plugin.name, 'inst')
+    self.assertEqual(geom.plugin.plugin_name, 'mujoco.sdf.torus')
+
+    # Assign plugin to mesh
+    mesh.plugin = plugin
+    self.assertEqual(mesh.plugin.name, 'inst')
+    self.assertEqual(mesh.plugin.plugin_name, 'mujoco.sdf.torus')
+
   def test_duplicate_name_error(self):
     main_xml = """
     <mujoco>
@@ -946,6 +996,26 @@ class SpecsTest(absltest.TestCase):
         ValueError, "Error: repeated name 'yellow' in material"
     ):
       spec.add_material().name = 'yellow'
+
+  def test_duplicate_name_error_when_adding_specs_with_kwargs(self):
+    spec = mujoco.MjSpec()
+    body = spec.worldbody.add_body(name='body')
+    body.add_geom(
+        type=mujoco.mjtGeom.mjGEOM_BOX, size=[0.1, 1, 1], name='dup'
+    )
+    with self.assertRaisesRegex(
+        ValueError, "Error: repeated name 'dup' in geom"
+    ):
+      body.add_geom(
+          type=mujoco.mjtGeom.mjGEOM_BOX, size=[1, 0.1, 1], name='dup'
+      )
+
+    spec2 = mujoco.MjSpec()
+    spec2.add_material(name='yellow')
+    with self.assertRaisesRegex(
+        ValueError, "Error: repeated name 'yellow' in material"
+    ):
+      spec2.add_material(name='yellow')
 
   def test_delete_unused_plugin(self):
     spec = mujoco.MjSpec.from_string("""
@@ -972,6 +1042,23 @@ class SpecsTest(absltest.TestCase):
     model = spec.compile()
     self.assertIsNotNone(model)
     self.assertEqual(model.nplugin, 0)
+
+  def testPluginAssignment(self):
+    spec = mujoco.MjSpec()
+    body = spec.worldbody.add_body()
+    body.name = 'test_body'
+
+    plugin = spec.add_plugin(
+        name='test_instance', plugin_name='mujoco.elasticity.cable', active=True
+    )
+    plugin.config = {'twist': '1e2', 'bend': '4e1'}
+
+    # Assignment should copy active flag and names
+    body.plugin = plugin
+
+    self.assertTrue(body.plugin.active)
+    self.assertEqual(body.plugin.name, 'test_instance')
+    self.assertEqual(body.plugin.plugin_name, 'mujoco.elasticity.cable')
 
   def test_access_option_stat_visual(self):
     spec = mujoco.MjSpec.from_string("""
@@ -1015,22 +1102,43 @@ class SpecsTest(absltest.TestCase):
     material.textures[texture_index] = 'texture_name'
     self.assertEqual(material.textures[texture_index], 'texture_name')
 
-    # Assign a complete list
-    material.textures = ['', 'new_name', '', '', '']
+    # Assign a complete list (must be mjNTEXROLE = 10 elements)
+    material.textures = ['', 'new_name', '', '', '', '', '', '', '', '']
     self.assertEqual(material.textures[texture_index], 'new_name')
 
     # textures is iterable
     self.assertEqual('new_name', ''.join(material.textures))
 
-    # supports `len`
-    self.assertLen(material.textures, 5)
+    # supports `len` - should always be mjNTEXROLE (10)
+    self.assertLen(material.textures, mujoco.mjtTextureRole.mjNTEXROLE)
 
     # field checks for out-of-bound access on read and on write
     with self.assertRaises(IndexError):
-      material.textures[5] = 'x'
+      material.textures[10] = 'x'
 
     with self.assertRaises(IndexError):
       material.textures[-1] = 'x'
+
+  def test_textures(self):
+    """Tests that partial texture list assignment raises ValueError."""
+
+    spec = mujoco.MjSpec()
+    material = spec.add_material(name='mat')
+    texture = spec.add_texture(
+        name='tex', builtin=mujoco.mjtBuiltin.mjBUILTIN_FLAT, width=2, height=2
+    )
+
+    # Should raise ValueError for incorrect size (only 1 element instead of 10)
+    with self.assertRaises(ValueError) as cm:
+      material.textures = ['tex']
+    self.assertIn('must have exactly 10 elements', str(cm.exception))
+    self.assertIn('got 1', str(cm.exception))
+
+    # Should succeed with correct size (mjNTEXROLE = 10)
+    material.textures = ['tex', '', '', '', '', '', '', '', '', '']
+    spec.worldbody.add_geom(size=[0.1, 0.1, 0.1], material='mat')
+    model = spec.compile()
+    self.assertIsNotNone(model)
 
   def test_assign_texture(self):
     spec = mujoco.MjSpec()
@@ -1076,6 +1184,27 @@ class SpecsTest(absltest.TestCase):
     self.assertIsNone(spec.texture('none'))
     self.assertIsNone(spec.mesh('none'))
 
+  def test_texture_gridlayout(self):
+    spec = mujoco.MjSpec()
+
+    texture = spec.add_texture(name='test', gridlayout='.U..LFRB.D..')
+    self.assertEqual(list(texture.gridlayout), list('.U..LFRB.D..'))
+
+    texture2 = spec.add_texture(name='test2', gridlayout=list('.U..LFRB.D..'))
+    self.assertEqual(list(texture2.gridlayout), list('.U..LFRB.D..'))
+
+    with self.assertRaises(ValueError) as cm:
+      spec.add_texture(name='test3', gridlayout='.U..')
+    self.assertIn('should have length 12', str(cm.exception))
+
+    with self.assertRaises(ValueError) as cm:
+      spec.add_texture(name='test4', gridlayout=['.', 'U', '.', '.'])
+    self.assertIn('should have length 12', str(cm.exception))
+
+    with self.assertRaises(ValueError) as cm:
+      spec.add_texture(name='test5', gridlayout=['..', 'U'] + ['.'] * 10)
+    self.assertIn('list elements must be single characters', str(cm.exception))
+
   def test_attach_units(self):
     child = mujoco.MjSpec()
     parent = mujoco.MjSpec()
@@ -1085,6 +1214,36 @@ class SpecsTest(absltest.TestCase):
     frame.attach_body(body, prefix='child-')
     model = parent.compile()
     np.testing.assert_almost_equal(model.body_quat[1], [1, 0, 0, 0])
+
+  def test_compiler_from_element(self):
+    child = mujoco.MjSpec()
+    child.meshdir = '/child/meshes'
+    child.texturedir = '/child/textures'
+    child_body = child.worldbody.add_body()
+    child_geom = child_body.add_geom()
+    child_geom.size[0] = 1
+    child_site = child_body.add_site()
+
+    parent = mujoco.MjSpec()
+    parent.meshdir = '/parent/meshes'
+    parent.texturedir = '/parent/textures'
+    parent_geom = parent.worldbody.add_geom()
+    parent_geom.size[0] = 1
+    parent_site = parent.worldbody.add_site()
+
+    self.assertEqual(parent_geom.compiler.meshdir, '/parent/meshes')
+    self.assertEqual(parent_geom.compiler.texturedir, '/parent/textures')
+    self.assertEqual(child_geom.compiler.meshdir, '/child/meshes')
+    self.assertEqual(child_site.compiler.meshdir, '/child/meshes')
+
+    frame = parent.worldbody.add_frame()
+    frame.attach_body(child_body, prefix='child-')
+
+    self.assertEqual(parent_geom.compiler.meshdir, '/parent/meshes')
+    self.assertEqual(parent_site.compiler.meshdir, '/parent/meshes')
+    self.assertEqual(child_geom.compiler.meshdir, '/child/meshes')
+    self.assertEqual(child_geom.compiler.texturedir, '/child/textures')
+    self.assertEqual(child_site.compiler.meshdir, '/child/meshes')
 
   def test_attach_to_site(self):
     parent = mujoco.MjSpec()
@@ -1231,6 +1390,21 @@ class SpecsTest(absltest.TestCase):
     with self.assertRaisesRegex(ValueError, 'Frame not found.'):
       parent.attach(child4, frame='invalid_frame', prefix='child3-')
 
+  def test_delete_from_attached_spec_error(self):
+    parent = mujoco.MjSpec()
+    child = mujoco.MjSpec()
+    body = child.worldbody.add_body(name='child_body')
+    geom = body.add_geom(name='child_geom')
+
+    frame = parent.worldbody.add_frame()
+    parent.attach(child, frame=frame, prefix='child_')
+
+    # Now child spec is attached. Deleting from it should raise ValueError.
+    with self.assertRaisesRegex(
+        ValueError, 'Cannot delete element from an attached mjSpec.'
+    ):
+      child.delete(geom)
+
   def test_attach_valid_child_lists(self):
     xml1 = """
     <mujoco>
@@ -1344,7 +1518,7 @@ class SpecsTest(absltest.TestCase):
   def test_actuator_shortname(self):
     spec = mujoco.MjSpec()
     actuator = spec.add_actuator(
-        gainprm=np.zeros((10, 1)),
+        gainprm=np.zeros((10,)),
         dyntype=mujoco.mjtDyn.mjDYN_FILTER,
         gaintype=mujoco.mjtGain.mjGAIN_AFFINE,
         biastype=mujoco.mjtBias.mjBIAS_AFFINE,
@@ -1396,6 +1570,13 @@ class SpecsTest(absltest.TestCase):
     self.assertEqual(actuator.dyntype, mujoco.mjtDyn.mjDYN_NONE)
     self.assertEqual(actuator.gaintype, mujoco.mjtGain.mjGAIN_FIXED)
     self.assertEqual(actuator.biastype, mujoco.mjtBias.mjBIAS_NONE)
+
+    actuator.set_to_dcmotor(motorconst=[0.05, 0.05], resistance=2.0)
+    self.assertEqual(actuator.gainprm[0], 2.0)
+    self.assertEqual(actuator.gainprm[1], 0.05)
+    self.assertEqual(actuator.dyntype, mujoco.mjtDyn.mjDYN_DCMOTOR)
+    self.assertEqual(actuator.gaintype, mujoco.mjtGain.mjGAIN_DCMOTOR)
+    self.assertEqual(actuator.biastype, mujoco.mjtBias.mjBIAS_DCMOTOR)
 
   def test_bad_contact_sensor(self):
     test_cases = [

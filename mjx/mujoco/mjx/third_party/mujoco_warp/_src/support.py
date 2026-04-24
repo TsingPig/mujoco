@@ -18,108 +18,113 @@ from typing import Optional, Tuple
 import warp as wp
 
 from mujoco.mjx.third_party.mujoco_warp._src.math import motion_cross
+from mujoco.mjx.third_party.mujoco_warp._src.types import MJ_MINVAL
 from mujoco.mjx.third_party.mujoco_warp._src.types import ConeType
 from mujoco.mjx.third_party.mujoco_warp._src.types import Data
+from mujoco.mjx.third_party.mujoco_warp._src.types import DynType
 from mujoco.mjx.third_party.mujoco_warp._src.types import JointType
 from mujoco.mjx.third_party.mujoco_warp._src.types import Model
 from mujoco.mjx.third_party.mujoco_warp._src.types import State
-from mujoco.mjx.third_party.mujoco_warp._src.types import TileSet
 from mujoco.mjx.third_party.mujoco_warp._src.types import vec5
+from mujoco.mjx.third_party.mujoco_warp._src.types import vec10f
 from mujoco.mjx.third_party.mujoco_warp._src.warp_util import cache_kernel
 from mujoco.mjx.third_party.mujoco_warp._src.warp_util import event_scope
-from mujoco.mjx.third_party.mujoco_warp._src.warp_util import nested_kernel
 
 wp.set_module_options({"enable_backward": False})
 
 
+# TODO(team): kernel analyzer array slice?
+@wp.func
+def next_act(
+  # Model:
+  opt_timestep: float,  # kernel_analyzer: ignore
+  actuator_dyntype: int,  # kernel_analyzer: ignore
+  actuator_dynprm: vec10f,  # kernel_analyzer: ignore
+  actuator_actrange: wp.vec2,  # kernel_analyzer: ignore
+  # Data In:
+  act_in: float,  # kernel_analyzer: ignore
+  act_dot_in: float,  # kernel_analyzer: ignore
+  # In:
+  act_dot_scale: float,
+  clamp: bool,
+) -> float:
+  # advance actuation
+  if actuator_dyntype == DynType.FILTEREXACT:
+    tau = wp.max(MJ_MINVAL, actuator_dynprm[0])
+    act = act_in + act_dot_scale * act_dot_in * tau * (1.0 - wp.exp(-opt_timestep / tau))
+  elif actuator_dyntype == DynType.USER:
+    return act_in
+  else:
+    act = act_in + act_dot_scale * act_dot_in * opt_timestep
+
+  # clamp to actrange
+  if clamp:
+    act = wp.clamp(act, actuator_actrange[0], actuator_actrange[1])
+
+  return act
+
+
 @cache_kernel
-def mul_m_sparse_diag(check_skip: bool):
-  @nested_kernel(module="unique", enable_backward=False)
-  def _mul_m_sparse_diag(
+def mul_m_sparse(check_skip: bool):
+  @wp.kernel(module="unique")
+  def _mul_m_sparse(
     # Model:
-    dof_Madr: wp.array(dtype=int),
+    qM_mulm_rowadr: wp.array[int],
+    qM_mulm_col: wp.array[int],
+    qM_mulm_madr: wp.array[int],
     # Data in:
-    qM_in: wp.array3d(dtype=float),
+    qM_in: wp.array3d[float],
     # In:
-    vec: wp.array2d(dtype=float),
-    skip: wp.array(dtype=bool),
+    vec: wp.array2d[float],
+    skip: wp.array[bool],
     # Out:
-    res: wp.array2d(dtype=float),
+    res: wp.array2d[float],
   ):
-    """Diagonal update for sparse matmul."""
+    """Sparse matmul: one thread per DOF, gather-based (no atomics)."""
     worldid, dofid = wp.tid()
 
     if wp.static(check_skip):
       if skip[worldid]:
         return
 
-    res[worldid, dofid] = qM_in[worldid, 0, dof_Madr[dofid]] * vec[worldid, dofid]
+    # Gather all contributions (diagonal + off-diagonal)
+    acc = float(0.0)
+    start = qM_mulm_rowadr[dofid]
+    end = qM_mulm_rowadr[dofid + 1]
+    for k in range(start, end):
+      col = qM_mulm_col[k]
+      madr = qM_mulm_madr[k]
+      acc += qM_in[worldid, 0, madr] * vec[worldid, col]
 
-  return _mul_m_sparse_diag
+    res[worldid, dofid] = acc
 
-
-@cache_kernel
-def mul_m_sparse_ij(check_skip: bool):
-  @nested_kernel(module="unique", enable_backward=False)
-  def _mul_m_sparse_ij(
-    # Model:
-    qM_mulm_i: wp.array(dtype=int),
-    qM_mulm_j: wp.array(dtype=int),
-    qM_madr_ij: wp.array(dtype=int),
-    # Data in:
-    qM_in: wp.array3d(dtype=float),
-    # In:
-    vec: wp.array2d(dtype=float),
-    skip: wp.array(dtype=bool),
-    # Out:
-    res: wp.array2d(dtype=float),
-  ):
-    """Off-diagonal update for sparse matmul."""
-    worldid, elementid = wp.tid()
-
-    if wp.static(check_skip):
-      if skip[worldid]:
-        return
-
-    i = qM_mulm_i[elementid]
-    j = qM_mulm_j[elementid]
-    madr_ij = qM_madr_ij[elementid]
-
-    qM_ij = qM_in[worldid, 0, madr_ij]
-
-    wp.atomic_add(res[worldid], i, qM_ij * vec[worldid, j])
-    wp.atomic_add(res[worldid], j, qM_ij * vec[worldid, i])
-
-  return _mul_m_sparse_ij
+  return _mul_m_sparse
 
 
 @cache_kernel
-def mul_m_dense(tile: TileSet, check_skip: bool):
-  """Returns a matmul kernel for some tile size."""
+def mul_m_dense(nv: int, check_skip: bool):
+  """Simple SIMT dense matmul: one thread per output element."""
 
-  @nested_kernel(module="unique", enable_backward=False)
+  @wp.kernel(module="unique")
   def _mul_m_dense(
-    # Data In:
-    qM_in: wp.array3d(dtype=float),
+    # Data in:
+    qM_in: wp.array3d[float],
     # In:
-    adr: wp.array(dtype=int),
-    vec: wp.array3d(dtype=float),
-    skip: wp.array(dtype=bool),
+    vec: wp.array2d[float],
+    skip: wp.array[bool],
     # Out:
-    res: wp.array3d(dtype=float),
+    res: wp.array2d[float],
   ):
-    worldid, nodeid = wp.tid()
-    TILE_SIZE = wp.static(tile.size)
+    worldid, i = wp.tid()
 
     if wp.static(check_skip):
       if skip[worldid]:
         return
 
-    dofid = adr[nodeid]
-    qM_tile = wp.tile_load(qM_in[worldid], shape=(TILE_SIZE, TILE_SIZE), offset=(dofid, dofid), bounds_check=False)
-    vec_tile = wp.tile_load(vec[worldid], shape=(TILE_SIZE, 1), offset=(dofid, 0), bounds_check=False)
-    res_tile = wp.tile_matmul(qM_tile, vec_tile)
-    wp.tile_store(res[worldid], res_tile, offset=(dofid, 0), bounds_check=False)
+    acc = float(0.0)
+    for j in range(wp.static(nv)):
+      acc += qM_in[worldid, i, j] * vec[worldid, j]
+    res[worldid, i] = acc
 
   return _mul_m_dense
 
@@ -128,8 +133,8 @@ def mul_m_dense(tile: TileSet, check_skip: bool):
 def mul_m(
   m: Model,
   d: Data,
-  res: wp.array2d(dtype=float),
-  vec: wp.array2d(dtype=float),
+  res: wp.array2d[float],
+  vec: wp.array2d[float],
   skip: Optional[wp.array] = None,
   M: Optional[wp.array] = None,
 ):
@@ -149,54 +154,39 @@ def mul_m(
   if M is None:
     M = d.qM
 
-  if m.opt.is_sparse:
+  if m.is_sparse:
     wp.launch(
-      mul_m_sparse_diag(check_skip),
+      mul_m_sparse(check_skip),
       dim=(d.nworld, m.nv),
-      inputs=[m.dof_Madr, M, vec, skip],
-      outputs=[res],
-    )
-
-    wp.launch(
-      mul_m_sparse_ij(check_skip),
-      dim=(d.nworld, m.qM_madr_ij.size),
-      inputs=[m.qM_mulm_i, m.qM_mulm_j, m.qM_madr_ij, M, vec, skip],
+      inputs=[m.qM_mulm_rowadr, m.qM_mulm_col, m.qM_mulm_madr, M, vec, skip],
       outputs=[res],
     )
 
   else:
-    for tile in m.qM_tiles:
-      wp.launch_tiled(
-        mul_m_dense(tile, check_skip),
-        dim=(d.nworld, tile.adr.size),
-        inputs=[
-          M,
-          tile.adr,
-          # note reshape: tile_matmul expects 2d input
-          vec.reshape(vec.shape + (1,)),
-          skip,
-        ],
-        outputs=[res.reshape(res.shape + (1,))],
-        block_dim=m.block_dim.mul_m_dense,
-      )
+    wp.launch(
+      mul_m_dense(m.nv, check_skip),
+      dim=(d.nworld, m.nv),
+      inputs=[M, vec, skip],
+      outputs=[res],
+    )
 
 
 @wp.kernel
 def _apply_ft(
   # Model:
   nbody: int,
-  body_parentid: wp.array(dtype=int),
-  body_rootid: wp.array(dtype=int),
-  dof_bodyid: wp.array(dtype=int),
+  body_parentid: wp.array[int],
+  body_rootid: wp.array[int],
+  dof_bodyid: wp.array[int],
   # Data in:
-  xipos_in: wp.array2d(dtype=wp.vec3),
-  subtree_com_in: wp.array2d(dtype=wp.vec3),
-  cdof_in: wp.array2d(dtype=wp.spatial_vector),
+  xipos_in: wp.array2d[wp.vec3],
+  subtree_com_in: wp.array2d[wp.vec3],
+  cdof_in: wp.array2d[wp.spatial_vector],
   # In:
-  ft_in: wp.array2d(dtype=wp.spatial_vector),
+  ft_in: wp.array2d[wp.spatial_vector],
   flg_add: bool,
   # Out:
-  qfrc_out: wp.array2d(dtype=float),
+  qfrc_out: wp.array2d[float],
 ):
   worldid, dofid = wp.tid()
   cdof = cdof_in[worldid, dofid]
@@ -226,7 +216,7 @@ def _apply_ft(
     qfrc_out[worldid, dofid] = accumul
 
 
-def apply_ft(m: Model, d: Data, ft: wp.array2d(dtype=wp.spatial_vector), qfrc: wp.array2d(dtype=float), flg_add: bool):
+def apply_ft(m: Model, d: Data, ft: wp.array2d[wp.spatial_vector], qfrc: wp.array2d[float], flg_add: bool):
   wp.launch(
     kernel=_apply_ft,
     dim=(d.nworld, m.nv),
@@ -236,7 +226,7 @@ def apply_ft(m: Model, d: Data, ft: wp.array2d(dtype=wp.spatial_vector), qfrc: w
 
 
 @event_scope
-def xfrc_accumulate(m: Model, d: Data, qfrc: wp.array2d(dtype=float)):
+def xfrc_accumulate(m: Model, d: Data, qfrc: wp.array2d[float]):
   """Map applied forces at each body via Jacobians to dof space and accumulate.
 
   Args:
@@ -248,35 +238,7 @@ def xfrc_accumulate(m: Model, d: Data, qfrc: wp.array2d(dtype=float)):
 
 
 @wp.func
-def all_same(v0: wp.vec3, v1: wp.vec3) -> wp.bool:
-  dx = abs(v0[0] - v1[0])
-  dy = abs(v0[1] - v1[1])
-  dz = abs(v0[2] - v1[2])
-
-  return (
-    (dx <= 1.0e-9 or dx <= max(abs(v0[0]), abs(v1[0])) * 1.0e-9)
-    and (dy <= 1.0e-9 or dy <= max(abs(v0[1]), abs(v1[1])) * 1.0e-9)
-    and (dz <= 1.0e-9 or dz <= max(abs(v0[2]), abs(v1[2])) * 1.0e-9)
-  )
-
-
-@wp.func
-def any_different(v0: wp.vec3, v1: wp.vec3) -> wp.bool:
-  dx = abs(v0[0] - v1[0])
-  dy = abs(v0[1] - v1[1])
-  dz = abs(v0[2] - v1[2])
-
-  return (
-    (dx > 1.0e-9 and dx > max(abs(v0[0]), abs(v1[0])) * 1.0e-9)
-    or (dy > 1.0e-9 and dy > max(abs(v0[1]), abs(v1[1])) * 1.0e-9)
-    or (dz > 1.0e-9 and dz > max(abs(v0[2]), abs(v1[2])) * 1.0e-9)
-  )
-
-
-@wp.func
-def _decode_pyramid(
-  njmax_in: int, pyramid: wp.array(dtype=float), efc_address: int, mu: vec5, condim: int
-) -> wp.spatial_vector:
+def _decode_pyramid(njmax_in: int, pyramid: wp.array[float], efc_address: int, mu: vec5, condim: int) -> wp.spatial_vector:
   """Converts pyramid representation to contact force."""
   force = wp.spatial_vector()
 
@@ -306,13 +268,13 @@ def contact_force_fn(
   # Model:
   opt_cone: int,
   # Data in:
-  contact_frame_in: wp.array(dtype=wp.mat33),
-  contact_friction_in: wp.array(dtype=vec5),
-  contact_dim_in: wp.array(dtype=int),
-  contact_efc_address_in: wp.array2d(dtype=int),
-  efc_force_in: wp.array2d(dtype=float),
+  contact_frame_in: wp.array[wp.mat33],
+  contact_friction_in: wp.array[vec5],
+  contact_dim_in: wp.array[int],
+  contact_efc_address_in: wp.array2d[int],
+  efc_force_in: wp.array2d[float],
   njmax_in: int,
-  nacon_in: wp.array(dtype=int),
+  nacon_in: wp.array[int],
   # In:
   worldid: int,
   contact_id: int,
@@ -351,19 +313,19 @@ def contact_force_kernel(
   # Model:
   opt_cone: int,
   # Data in:
-  contact_frame_in: wp.array(dtype=wp.mat33),
-  contact_friction_in: wp.array(dtype=vec5),
-  contact_dim_in: wp.array(dtype=int),
-  contact_efc_address_in: wp.array2d(dtype=int),
-  contact_worldid_in: wp.array(dtype=int),
-  efc_force_in: wp.array2d(dtype=float),
+  contact_frame_in: wp.array[wp.mat33],
+  contact_friction_in: wp.array[vec5],
+  contact_dim_in: wp.array[int],
+  contact_efc_address_in: wp.array2d[int],
+  contact_worldid_in: wp.array[int],
+  efc_force_in: wp.array2d[float],
   njmax_in: int,
-  nacon_in: wp.array(dtype=int),
+  nacon_in: wp.array[int],
   # In:
-  contact_ids: wp.array(dtype=int),
+  contact_ids: wp.array[int],
   to_world_frame: bool,
   # Out:
-  out: wp.array(dtype=wp.spatial_vector),
+  out: wp.array[wp.spatial_vector],
 ):
   tid = wp.tid()
 
@@ -389,9 +351,7 @@ def contact_force_kernel(
   )
 
 
-def contact_force(
-  m: Model, d: Data, contact_ids: wp.array(dtype=int), to_world_frame: bool, force: wp.array(dtype=wp.spatial_vector)
-):
+def contact_force(m: Model, d: Data, contact_ids: wp.array[int], to_world_frame: bool, force: wp.array[wp.spatial_vector]):
   """Compute forces for contacts in Data.
 
   Args:
@@ -434,14 +394,14 @@ def transform_force(frc: wp.spatial_vector, offset: wp.vec3) -> wp.spatial_vecto
 
 
 @wp.func
-def jac(
+def jac_dof(
   # Model:
-  body_parentid: wp.array(dtype=int),
-  body_rootid: wp.array(dtype=int),
-  dof_bodyid: wp.array(dtype=int),
+  body_parentid: wp.array[int],
+  body_rootid: wp.array[int],
+  dof_bodyid: wp.array[int],
   # Data in:
-  subtree_com_in: wp.array2d(dtype=wp.vec3),
-  cdof_in: wp.array2d(dtype=wp.spatial_vector),
+  subtree_com_in: wp.array2d[wp.vec3],
+  cdof_in: wp.array2d[wp.spatial_vector],
   # In:
   point: wp.vec3,
   bodyid: int,
@@ -472,20 +432,89 @@ def jac(
   return jacp, jacr
 
 
+@cache_kernel
+def _make_jac_kernel(has_jacp: bool, has_jacr: bool):
+  @wp.kernel(module="unique", enable_backward=False)
+  def _jac(
+    # Model:
+    body_parentid: wp.array[int],
+    body_rootid: wp.array[int],
+    dof_bodyid: wp.array[int],
+    # Data in:
+    subtree_com_in: wp.array2d[wp.vec3],
+    cdof_in: wp.array2d[wp.spatial_vector],
+    # In:
+    point_in: wp.array[wp.vec3],
+    bodyid_in: wp.array[int],
+    # Out:
+    jacp_out: wp.array3d[float],
+    jacr_out: wp.array3d[float],
+  ):
+    worldid, dofid = wp.tid()
+
+    jacp_val, jacr_val = jac_dof(
+      body_parentid, body_rootid, dof_bodyid, subtree_com_in, cdof_in, point_in[worldid], bodyid_in[worldid], dofid, worldid
+    )
+
+    if wp.static(has_jacp):
+      jacp_out[worldid, 0, dofid] = jacp_val[0]
+      jacp_out[worldid, 1, dofid] = jacp_val[1]
+      jacp_out[worldid, 2, dofid] = jacp_val[2]
+
+    if wp.static(has_jacr):
+      jacr_out[worldid, 0, dofid] = jacr_val[0]
+      jacr_out[worldid, 1, dofid] = jacr_val[1]
+      jacr_out[worldid, 2, dofid] = jacr_val[2]
+
+  return _jac
+
+
+@event_scope
+def jac(
+  m: Model,
+  d: Data,
+  jacp: wp.array | None,  # wp.array3d[float]
+  jacr: wp.array | None,  # wp.array3d[float]
+  point: wp.array[wp.vec3],
+  body: wp.array[int],
+):
+  """Compute translational and rotational Jacobian for point on body.
+
+  Args:
+    m: The model containing kinematic and dynamic information (device).
+    d: The data object containing the current state (device).
+    jacp: Output translational Jacobian (optional).
+    jacr: Output rotational Jacobian (optional).
+    point: 3D point in global coordinates.
+    body: Body ID for each world.
+  """
+  kernel = _make_jac_kernel(jacp is not None, jacr is not None)
+
+  jacp_arr = jacp or wp.empty((0, 0, 0), dtype=float)
+  jacr_arr = jacr or wp.empty((0, 0, 0), dtype=float)
+
+  wp.launch(
+    kernel,
+    dim=(d.nworld, m.nv),
+    inputs=[m.body_parentid, m.body_rootid, m.dof_bodyid, d.subtree_com, d.cdof, point, body],
+    outputs=[jacp_arr, jacr_arr],
+  )
+
+
 @wp.func
-def jac_dot(
+def jac_dot_dof(
   # Model:
-  body_parentid: wp.array(dtype=int),
-  body_rootid: wp.array(dtype=int),
-  jnt_type: wp.array(dtype=int),
-  jnt_dofadr: wp.array(dtype=int),
-  dof_bodyid: wp.array(dtype=int),
-  dof_jntid: wp.array(dtype=int),
+  body_parentid: wp.array[int],
+  body_rootid: wp.array[int],
+  jnt_type: wp.array[int],
+  jnt_dofadr: wp.array[int],
+  dof_bodyid: wp.array[int],
+  dof_jntid: wp.array[int],
   # Data in:
-  subtree_com_in: wp.array2d(dtype=wp.vec3),
-  cdof_in: wp.array2d(dtype=wp.spatial_vector),
-  cvel_in: wp.array2d(dtype=wp.spatial_vector),
-  cdof_dot_in: wp.array2d(dtype=wp.spatial_vector),
+  subtree_com_in: wp.array2d[wp.vec3],
+  cdof_in: wp.array2d[wp.spatial_vector],
+  cvel_in: wp.array2d[wp.spatial_vector],
+  cdof_dot_in: wp.array2d[wp.spatial_vector],
   # In:
   point: wp.vec3,
   bodyid: int,
@@ -540,7 +569,7 @@ def jac_dot(
   return jacp, jacr
 
 
-def get_state(m: Model, d: Data, state: wp.array2d(dtype=float), sig: int, active: Optional[wp.array] = None):
+def get_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Optional[wp.array] = None):
   """Copy concatenated state components specified by sig from Data into state.
 
   The bits of the integer sig correspond to element fields of State.
@@ -555,7 +584,7 @@ def get_state(m: Model, d: Data, state: wp.array2d(dtype=float), sig: int, activ
   if sig >= (1 << State.NSTATE):
     raise ValueError(f"invalid state signature {sig} >= 2^mjNSTATE")
 
-  @nested_kernel(module="unique", enable_backward=False)
+  @wp.kernel(module="unique", enable_backward=False)
   def _get_state(
     # Model:
     nq: int,
@@ -566,22 +595,22 @@ def get_state(m: Model, d: Data, state: wp.array2d(dtype=float), sig: int, activ
     neq: int,
     nmocap: int,
     # Data in:
-    time_in: wp.array(dtype=float),
-    qpos_in: wp.array2d(dtype=float),
-    qvel_in: wp.array2d(dtype=float),
-    act_in: wp.array2d(dtype=float),
-    qacc_warmstart_in: wp.array2d(dtype=float),
-    ctrl_in: wp.array2d(dtype=float),
-    qfrc_applied_in: wp.array2d(dtype=float),
-    xfrc_applied_in: wp.array2d(dtype=wp.spatial_vector),
-    eq_active_in: wp.array2d(dtype=bool),
-    mocap_pos_in: wp.array2d(dtype=wp.vec3),
-    mocap_quat_in: wp.array2d(dtype=wp.quat),
+    time_in: wp.array[float],
+    qpos_in: wp.array2d[float],
+    qvel_in: wp.array2d[float],
+    act_in: wp.array2d[float],
+    qacc_warmstart_in: wp.array2d[float],
+    ctrl_in: wp.array2d[float],
+    qfrc_applied_in: wp.array2d[float],
+    xfrc_applied_in: wp.array2d[wp.spatial_vector],
+    eq_active_in: wp.array2d[bool],
+    mocap_pos_in: wp.array2d[wp.vec3],
+    mocap_quat_in: wp.array2d[wp.quat],
     # In:
     sig_in: int,
-    active_in: wp.array(dtype=bool),
+    active_in: wp.array[bool],
     # Out:
-    state_out: wp.array2d(dtype=float),
+    state_out: wp.array2d[float],
   ):
     worldid = wp.tid()
 
@@ -679,7 +708,7 @@ def get_state(m: Model, d: Data, state: wp.array2d(dtype=float), sig: int, activ
   )
 
 
-def set_state(m: Model, d: Data, state: wp.array2d(dtype=float), sig: int, active: Optional[wp.array] = None):
+def set_state(m: Model, d: Data, state: wp.array2d[float], sig: int, active: Optional[wp.array] = None):
   """Copy concatenated state components specified by sig from state into Data.
 
   The bits of the integer sig correspond to element fields of State.
@@ -694,7 +723,7 @@ def set_state(m: Model, d: Data, state: wp.array2d(dtype=float), sig: int, activ
   if sig >= (1 << State.NSTATE):
     raise ValueError(f"invalid state signature {sig} >= 2^mjNSTATE")
 
-  @nested_kernel(module="unique", enable_backward=False)
+  @wp.kernel(module="unique", enable_backward=False)
   def _set_state(
     # Model:
     nq: int,
@@ -706,20 +735,20 @@ def set_state(m: Model, d: Data, state: wp.array2d(dtype=float), sig: int, activ
     nmocap: int,
     # In:
     sig_in: int,
-    active_in: wp.array(dtype=bool),
-    state_in: wp.array2d(dtype=float),
+    active_in: wp.array[bool],
+    state_in: wp.array2d[float],
     # Data out:
-    time_out: wp.array(dtype=float),
-    qpos_out: wp.array2d(dtype=float),
-    qvel_out: wp.array2d(dtype=float),
-    act_out: wp.array2d(dtype=float),
-    qacc_warmstart_out: wp.array2d(dtype=float),
-    ctrl_out: wp.array2d(dtype=float),
-    qfrc_applied_out: wp.array2d(dtype=float),
-    xfrc_applied_out: wp.array2d(dtype=wp.spatial_vector),
-    eq_active_out: wp.array2d(dtype=bool),
-    mocap_pos_out: wp.array2d(dtype=wp.vec3),
-    mocap_quat_out: wp.array2d(dtype=wp.quat),
+    time_out: wp.array[float],
+    qpos_out: wp.array2d[float],
+    qvel_out: wp.array2d[float],
+    act_out: wp.array2d[float],
+    qacc_warmstart_out: wp.array2d[float],
+    ctrl_out: wp.array2d[float],
+    qfrc_applied_out: wp.array2d[float],
+    xfrc_applied_out: wp.array2d[wp.spatial_vector],
+    eq_active_out: wp.array2d[bool],
+    mocap_pos_out: wp.array2d[wp.vec3],
+    mocap_quat_out: wp.array2d[wp.quat],
   ):
     worldid = wp.tid()
 

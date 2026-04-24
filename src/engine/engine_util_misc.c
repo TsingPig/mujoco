@@ -612,11 +612,116 @@ mjtNum mju_evalBasis(const mjtNum x[3], int i, int order) {
   }
 }
 
+// map global parametric coord to cell-local coord and build node indices
+//   coord: [0,1]^3 parametric coordinates
+//   cellnum: cell counts (cx, cy, cz)
+//   order: interpolation order (1=trilinear, 2=triquadratic)
+//   local: output local parametric coordinates within cell [0,1]^3
+//   nodeindices: output array of global node indices for the cell (size (order+1)^3, may be NULL)
+//   returns: number of nodes per cell (order+1)^3
+int mju_cellLookup(const mjtNum coord[3], const int cellnum[3], int order, mjtNum local[3],
+                   int* nodeindices) {
+  int cx = cellnum[0], cy = cellnum[1], cz = cellnum[2];
+
+  // find containing cell
+  int ci = (int)mju_floor(coord[0] * cx);
+  int cj = (int)mju_floor(coord[1] * cy);
+  int ck = (int)mju_floor(coord[2] * cz);
+  ci = mjMIN(ci, cx - 1); ci = mjMAX(ci, 0);
+  cj = mjMIN(cj, cy - 1); cj = mjMAX(cj, 0);
+  ck = mjMIN(ck, cz - 1); ck = mjMAX(ck, 0);
+
+  // local parametric coordinates within cell
+  local[0] = mju_clip(coord[0] * cx - ci, 0, 1);
+  local[1] = mju_clip(coord[1] * cy - cj, 0, 1);
+  local[2] = mju_clip(coord[2] * cz - ck, 0, 1);
+
+  // build node indices for this cell
+  if (nodeindices) {
+    int ny_g = cy * order + 1;
+    int nz_g = cz * order + 1;
+    int ni = 0;
+    for (int li = 0; li <= order; li++) {
+      for (int lj = 0; lj <= order; lj++) {
+        for (int lk = 0; lk <= order; lk++) {
+          int gi = ci*order + li;
+          int gj = cj*order + lj;
+          int gk = ck*order + lk;
+          nodeindices[ni++] = gi*ny_g*nz_g + gj*nz_g + gk;
+        }
+      }
+    }
+  }
+
+  int npc = (order + 1) * (order + 1) * (order + 1);
+  return npc;
+}
+
+
 // interpolate a function at x with given interpolation coefficients and order n
-void mju_interpolate3D(mjtNum res[3], const mjtNum x[3], const mjtNum* coeff, int order) {
+void mju_interpolate3D(mjtNum res[3], const mjtNum x[3], const mjtNum* coeff, int order,
+                       const int* nodeindices) {
   int npoint = (order + 1) * (order + 1) * (order + 1);
   for (int j=0; j < npoint; j++) {
-    mju_addToScl3(res, coeff+3*j, mju_evalBasis(x, j, order));
+    int idx = nodeindices ? nodeindices[j] : j;
+    mju_addToScl3(res, coeff+3*idx, mju_evalBasis(x, j, order));
+  }
+}
+
+
+static void flexInterpRotation(int order, const mjtNum* xpos_c,
+                               const mjtNum local[3], mjtNum* quat) {
+  mjtNum mat[9] = {0};
+
+  if (order > 0) {
+    mju_defGradient(mat, local, xpos_c, order);
+  } else {
+    // order 0: fallback to identity matrix
+    mat[0] = 1;
+    mat[4] = 1;
+    mat[8] = 1;
+  }
+
+  // find rotation
+  quat[0] = 1;
+  quat[1] = 0;
+  quat[2] = 0;
+  quat[3] = 0;
+  mju_mat2Rot(quat, mat);
+  mju_negQuat(quat, quat);
+}
+
+
+// gather cell-local quantities and optionally compute rotation
+void mju_flexGatherCellState(int order, int cy, int cz, int ci, int cj, int ck,
+                             const mjtNum* xpos_g, const mjtNum* vel_g, const mjtNum* xpos0_g,
+                             mjtNum* xpos_c, mjtNum* vel_c, mjtNum* xpos0_c,
+                             int* nodeindices, mjtNum* quat) {
+  int ny_g = cy * order + 1;
+  int nz_g = cz * order + 1;
+
+  int local = 0;
+  for (int li = 0; li <= order; li++) {
+    for (int lj = 0; lj <= order; lj++) {
+      for (int lk = 0; lk <= order; lk++) {
+        int gi = ci*order + li;
+        int gj = cj*order + lj;
+        int gk = ck*order + lk;
+        int gidx = gi*ny_g*nz_g + gj*nz_g + gk;
+
+        if (xpos_c && xpos_g) mju_copy3(xpos_c + 3*local, xpos_g + 3*gidx);
+        if (vel_c && vel_g) mju_copy3(vel_c + 3*local, vel_g + 3*gidx);
+        if (xpos0_c && xpos0_g) mju_copy3(xpos0_c + 3*local, xpos0_g + 3*gidx);
+        if (nodeindices) nodeindices[local] = gidx;
+
+        local++;
+      }
+    }
+  }
+
+  if (quat && xpos_c) {
+    mjtNum p[3] = {.5, .5, .5};
+    flexInterpRotation(order, xpos_c, p, quat);
   }
 }
 
@@ -769,6 +874,26 @@ mjtNum mju_muscleDynamics(mjtNum ctrl, mjtNum act, const mjtNum prm[3]) {
 }
 
 
+// LuGre Stribeck function: g(v) = F_C + (F_S - F_C) * exp(-(v/v_S)^2)
+mjtNum mj_lugreStribeck(mjtNum velocity, mjtNum F_C, mjtNum F_S, mjtNum v_S) {
+  mjtNum ratio = velocity / mju_max(mjMINVAL, v_S);
+  return F_C + (F_S - F_C) * mju_exp(-ratio*ratio);
+}
+
+
+// compute DC motor activation slot indices from parameter arrays
+mjDCMotorSlots mj_dcmotorSlots(const mjtNum* dynprm, const mjtNum* gainprm) {
+  mjDCMotorSlots s = {-1, -1, -1, -1, -1, 0};
+  if (dynprm[7] > 0)  s.slew        = s.num_slots++;  // slew rate limiting
+  if (gainprm[5] > 0) s.integral    = s.num_slots++;  // PI integral
+  if (dynprm[2] > 0)  s.temperature = s.num_slots++;  // thermal model
+  if (dynprm[5] > 0)  s.bristle     = s.num_slots++;  // LuGre bristle
+  if (dynprm[0] > 0)  s.current     = s.num_slots++;  // current filter
+
+  return s;
+}
+
+
 //---------------------------------------- Base64 --------------------------------------------------
 
 // decoding function for Base64
@@ -907,6 +1032,215 @@ size_t mju_decodeBase64(uint8_t* buf, const char* s) {
     }
   }
   return j;
+}
+
+
+//------------------------------ history buffers ---------------------------------------------------
+
+// convert logical index (0=oldest, n-1=newest) to physical index
+// cursor points to the newest element (logical index n-1)
+static inline int historyPhysicalIndex(int cursor, int n, int logical) {
+  return (cursor + 1 + logical) % n;
+}
+
+
+// find logical index i such that times[i-1] < t <= times[i], using circular binary search
+// returns 0 if t <= times[oldest], n if t > times[newest]
+// cursor points to the newest element (logical index n-1)
+static int historyFindIndex(const mjtNum* times, int n, int cursor, mjtNum t) {
+  // get oldest and newest timestamps
+  int oldest_phys = historyPhysicalIndex(cursor, n, 0);
+  int newest_phys = historyPhysicalIndex(cursor, n, n-1);
+  mjtNum t_oldest = times[oldest_phys];
+  mjtNum t_newest = times[newest_phys];
+
+  // before or at first element
+  if (t <= t_oldest) {
+    return 0;
+  }
+
+  // after last element
+  if (t > t_newest) {
+    return n;
+  }
+
+  // circular binary search: find smallest logical i such that times[phys(i)] >= t
+  int lo = 0;
+  int hi = n - 1;
+  while (hi - lo > 1) {
+    int mid = (lo + hi) / 2;
+    int mid_phys = historyPhysicalIndex(cursor, n, mid);
+    if (times[mid_phys] < t) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+
+  return hi;
+}
+
+
+// initialize history buffer with given times and values; times must be strictly increasing
+// buffer layout: [user(1), cursor(1), times(n), values(n*dim)]
+void mju_historyInit(mjtNum* buf, int n, int dim, const mjtNum* times, const mjtNum* values,
+                     mjtNum user) {
+  // check strict monotonicity of times
+  for (int i = 0; i < n-1; i++) {
+    if (times[i+1] - times[i] < mjMINVAL) {
+      mjERROR("times must be strictly increasing, got times[%d]=%g >= times[%d]=%g",
+              i, times[i], i+1, times[i+1]);
+    }
+  }
+
+  // buf layout: [user(1), cursor(1), times(n), values(n*dim)]
+  buf[0] = user;           // user value
+  buf[1] = (mjtNum)(n-1);  // cursor points to newest (logical index n-1 = physical index n-1)
+
+  mjtNum* buf_times = buf + 2;
+  mjtNum* buf_values = buf + 2 + n;
+
+  if (times != buf_times) mju_copy(buf_times, times, n);
+  if (values) mju_copy(buf_values, values, n*dim);
+}
+
+
+// find insertion slot for time t, maintaining sorted order
+// if t matches an existing timestamp, returns pointer to that slot
+// if a new sample is inserted, the oldest sample is dropped
+// returns pointer to value slot where caller should write dim values
+mjtNum* mju_historyInsert(mjtNum* buf, int n, int dim, mjtNum t) {
+  int cursor = (int)buf[1];
+  mjtNum* times = buf + 2;
+  mjtNum* values = buf + 2 + n;
+
+  // find logical insertion index: times[i-1] < t <= times[i]
+  int i = historyFindIndex(times, n, cursor, t);
+
+  // exact match at logical i: return pointer to existing slot
+  if (i < n) {
+    int phys_i = historyPhysicalIndex(cursor, n, i);
+    if (mju_abs(t - times[phys_i]) < mjMINVAL) {
+      return values + phys_i*dim;
+    }
+  }
+
+  // logical i == 0: new sample is older than oldest, replace oldest slot
+  if (i == 0) {
+    int oldest_phys = historyPhysicalIndex(cursor, n, 0);
+    times[oldest_phys] = t;
+    return values + oldest_phys*dim;
+  }
+
+  // logical i == n: new sample is newer than newest, advance cursor and write
+  if (i == n) {
+    cursor = (cursor + 1) % n;
+    buf[1] = (mjtNum)cursor;
+
+    // cursor now points to the new newest slot (which was the old oldest)
+    times[cursor] = t;
+    return values + cursor*dim;
+  }
+
+  // 0 < i < n: out-of-order insertion, shift [1, i-1] left (dropping 0), insert at i-1
+  for (int j = 0; j < i-1; j++) {
+    int src_phys = historyPhysicalIndex(cursor, n, j+1);
+    int dst_phys = historyPhysicalIndex(cursor, n, j);
+    times[dst_phys] = times[src_phys];
+    mju_copy(values + dst_phys*dim, values + src_phys*dim, dim);
+  }
+  int insert_phys = historyPhysicalIndex(cursor, n, i-1);
+  times[insert_phys] = t;
+  return values + insert_phys*dim;
+}
+
+
+// read vector value at time t; interp: 0=zero-order-hold, 1=linear, 2=cubic spline
+// returns pointer to sample in buffer on exact match or ZOH (res untouched)
+// returns NULL and writes interpolated result to res on interpolation
+const mjtNum* mju_historyRead(const mjtNum* buf, int n, int dim, mjtNum* res, mjtNum t, int interp) {
+  int cursor = (int)buf[1];
+  const mjtNum* times = buf + 2;
+  const mjtNum* values = buf + 2 + n;
+
+  int oldest_phys = historyPhysicalIndex(cursor, n, 0);
+  int newest_phys = historyPhysicalIndex(cursor, n, n-1);
+  mjtNum t_oldest = times[oldest_phys];
+  mjtNum t_newest = times[newest_phys];
+
+  // extrapolate before oldest: return pointer to oldest value
+  if (t <= t_oldest + mjMINVAL) {
+    return values + oldest_phys*dim;
+  }
+
+  // extrapolate after newest: return pointer to newest value
+  if (t >= t_newest - mjMINVAL) {
+    return values + newest_phys*dim;
+  }
+
+  // find bracketing logical index: times[i-1] < t <= times[i]
+  int i = historyFindIndex(times, n, cursor, t);
+  int phys_i = historyPhysicalIndex(cursor, n, i);
+
+  // check for exact match at i
+  if (mju_abs(t - times[phys_i]) < mjMINVAL) {
+    return values + phys_i*dim;
+  }
+
+  // lo = i-1, hi = i (we know i > 0 because t > t_oldest)
+  int phys_lo = historyPhysicalIndex(cursor, n, i-1);
+  int phys_hi = phys_i;
+
+  // zero-order hold: return pointer to lo (most recent sample <= t)
+  if (interp == 0) {
+    return values + phys_lo*dim;
+  }
+
+  mjtNum dt = times[phys_hi] - times[phys_lo];
+  mjtNum alpha = (t - times[phys_lo]) / dt;
+
+  // piecewise linear interpolation
+  if (interp == 1) {
+    for (int d = 0; d < dim; d++) {
+      res[d] = values[phys_lo*dim+d] + alpha * (values[phys_hi*dim+d] - values[phys_lo*dim+d]);
+    }
+  }
+
+  // cubic spline interpolation
+  else {
+    // Hermite basis functions
+    mjtNum alpha2 = alpha * alpha;
+    mjtNum alpha3 = alpha2 * alpha;
+    mjtNum h00 = 2*alpha3 - 3*alpha2 + 1;
+    mjtNum h10 = alpha3 - 2*alpha2 + alpha;
+    mjtNum h01 = -2*alpha3 + 3*alpha2;
+    mjtNum h11 = alpha3 - alpha2;
+
+    for (int d = 0; d < dim; d++) {
+      // finite differenced catmull-rom slopes, 0 at endpoints (constant extrapolation)
+
+      mjtNum m_lo = 0;
+      if (i > 1) {
+        int phys_lo_prev = historyPhysicalIndex(cursor, n, i-2);
+        mjtNum dt_lo = times[phys_hi] - times[phys_lo_prev];
+        m_lo = (values[phys_hi*dim+d] - values[phys_lo_prev*dim+d]) / dt_lo;
+      }
+
+      mjtNum m_hi = 0;
+      if (i < n - 1) {
+        int phys_hi_next = historyPhysicalIndex(cursor, n, i+1);
+        mjtNum dt_hi = times[phys_hi_next] - times[phys_lo];
+        m_hi = (values[phys_hi_next*dim+d] - values[phys_lo*dim+d]) / dt_hi;
+      }
+
+      res[d] = h00 * values[phys_lo*dim+d] +
+               h10 * dt * m_lo +
+               h01 * values[phys_hi*dim+d] +
+               h11 * dt * m_hi;
+    }
+  }
+
+  return NULL;
 }
 
 
@@ -1075,21 +1409,13 @@ void mju_printMatSparse(const mjtNum* mat, int nr,
 
 // min function, avoid re-evaluation
 mjtNum mju_min(mjtNum a, mjtNum b) {
-  if (a <= b) {
-    return a;
-  } else {
-    return b;
-  }
+  return a <= b ? a : b;
 }
 
 
 // max function, avoid re-evaluation
 mjtNum mju_max(mjtNum a, mjtNum b) {
-  if (a >= b) {
-    return a;
-  } else {
-    return b;
-  }
+  return a >= b ? a : b;
 }
 
 
@@ -1364,10 +1690,6 @@ const char* mju_warningText(int warning, size_t info) {
     mjSNPRINTF(str,
                "Insufficient arena memory for the number of constraints generated. "
                "Increase arena memory allocation above %s bytes.", mju_writeNumBytes(info));
-    break;
-
-  case mjWARN_VGEOMFULL:
-    mjSNPRINTF(str, "Pre-allocated visual geom buffer is full. Increase maxgeom above %zu.", info);
     break;
 
   case mjWARN_BADQPOS:
@@ -1672,6 +1994,53 @@ char* mju_strncpy(char *dst, const char *src, int n) {
   }
 
   return dst;
+}
+
+
+// polynomial force coefficient: force = -x * mju_polyForce(...)
+//   flg_odd=0: linear + poly[0]*x   + poly[1]*x^2 + ...
+//   flg_odd=1: linear + poly[0]*|x| + poly[1]*x^2 + ...  (p is even, p*x is odd)
+mjtNum mju_polyForce(mjtNum linear, const mjtNum* poly, mjtNum x, int n, int flg_odd) {
+  x = flg_odd ? mju_abs(x) : x;
+  mjtNum res = linear;
+
+  mjtNum xpow = 1;
+  for (int i=0; i < n; i++) {
+    xpow *= x;
+    res += poly[i] * xpow;
+  }
+
+  return res;
+}
+
+
+// derivative of (x * mju_polyForce) w.r.t. x
+mjtNum mjd_xPolyForce(mjtNum linear, const mjtNum* poly, mjtNum x, int n, int flg_odd) {
+  x = flg_odd ? mju_abs(x) : x;
+  mjtNum res = linear;
+
+  mjtNum xpow = 1;
+  for (int i=0; i < n; i++) {
+    xpow *= x;
+    res += (i+2) * poly[i] * xpow;
+  }
+
+  return res;
+}
+
+
+// potential energy: integral from 0 to x of mju_polyForce(t) * t dt
+mjtNum mju_polyPotential(mjtNum linear, const mjtNum* poly, mjtNum x, int n, int flg_odd) {
+  x = flg_odd ? mju_abs(x) : x;
+  mjtNum res = 0.5 * linear * (x * x);
+
+  mjtNum xpow = x;
+  for (int i=0; i < n; i++) {
+    xpow *= x;
+    res += poly[i] / (i+3) * (xpow * x);
+  }
+
+  return res;
 }
 
 
