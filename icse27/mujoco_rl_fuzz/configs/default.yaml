@@ -1,0 +1,105 @@
+# MuJoCo RL-Guided Fuzzing — Default Config
+# 见 ../guide.md §9
+
+run:
+  mode: random              # random | rl | dryrun
+  budget: 1000              # 总 testcase 数
+  timeout_sec: 10           # 单个 testcase 子进程 wall-time 上限
+  seed: 0                   # 全局 RNG 种子
+  out_dir: outputs
+  log_dir: logs
+
+seeds:
+  dir: seeds                # 相对项目根
+  pattern: "*.xml"
+
+rollout:
+  steps_buckets: [1, 5, 10, 50, 100]
+  default_steps: 50
+
+# 高级 mutator 白名单（GzFuzz 风格 10 个）。注释掉的项可临时禁用。
+mutators:
+  - STRUCT_GROW
+  - STRUCT_SHRINK
+  - STRUCT_REWIRE
+  - GEOM_PERTURB
+  - JOINT_PERTURB
+  - INERTIAL_PERTURB
+  - CONTACT_PERTURB
+  - ACTUATOR_EDIT
+  - SOLVER_TOGGLE
+  - STATE_PERTURB
+
+# 参数桶（buckets）：值 → 实际取值表
+buckets:
+  pos: [-0.1, -0.01, -0.001, 0.0, 0.001, 0.01, 0.1]
+  size:
+    small:  [0.005, 0.005, 0.005]
+    medium: [0.05, 0.05, 0.05]
+    large:  [0.5, 0.5, 0.5]
+  joint_range:
+    narrow: [-0.1, 0.1]
+    medium: [-1.5, 1.5]
+    wide:   [-3.14, 3.14]
+  mass:
+    tiny:   0.001
+    normal: 1.0
+    heavy:  1000.0
+  friction:
+    low:    [0.1, 0.005, 0.0001]
+    medium: [1.0, 0.005, 0.0001]
+    high:   [10.0, 0.05, 0.001]
+  damping:
+    low:    0.001
+    medium: 0.1
+    high:   10.0
+  ctrlrange:
+    tight:  [-0.1, 0.1]
+    normal: [-2.0, 2.0]
+    wide:   [-1000.0, 1000.0]
+  state_scale:
+    small: 1.0e-2
+    medium: 1.0
+    large: 1.0e3
+    nan: NaN
+    inf: Inf
+
+# Oracle / warning 类型白名单（与 mujoco.mjtWarning 对齐）
+warnings_track:
+  - INERTIA
+  - CONTACTFULL
+  - CNSTRFULL
+  - VGEOMFULL
+  - BADQPOS
+  - BADQVEL
+  - BADQACC
+  - BADCTRL
+
+# Reward（见 guide §14）
+reward:
+  crash: 10.0
+  fatal_error: 8.0
+  timeout: 5.0
+  new_warning: 4.0
+  inconsistency: 3.0
+  known_warning: 2.0
+  novel_state_bucket: 1.0
+  trivial_compile_fail: -1.0
+  duplicate_signature: -2.0
+
+# Actor-Critic 网络（见 guide §15）
+rl:
+  policy: actor_critic       # random | bandit | actor_critic
+  hidden_dim: 128
+  history_k: 8               # mutation_history_ids 长度
+  lr: 3.0e-4
+  gamma: 0.99
+  entropy_coef: 0.01
+  value_coef: 0.5
+  rollout_per_update: 64
+
+# LLM-finetune baseline（占位，Step 8 启用）
+llm:
+  enabled: false
+  model_name: Qwen/Qwen2.5-1.5B
+  max_new_tokens: 64
