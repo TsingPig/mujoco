@@ -1,692 +1,574 @@
-# MuJoCo RL-Guided Fuzzing 原型 — 完整实施指南
+# A Reinforcement-Learning-Guided Fuzzer for the MuJoCo Physics Engine
 
-```
-问: 你对 MuJoCo / fuzzing / RL 三者的当前掌握程度？
-答: MuJoCo 零基础，fuzzing 零基础，RL 有经验（grid-world A3C 那种）
-问: RL vs LLM-finetune 的对比，你希望共享到哪一层？
-答: 共享 state featurizer（结构特征+warning+数值统计），RL/LLM 只换 policy head
-问: LLM baseline 你设想的具体形态？
-答: 小模型微调（Qwen2.5-1.5B / CodeLlama-7B）做 mutation 选择 + 参数预测
-问: 可行性 demo 的具体程度？
-答: 单脚本：1 seed + 1 mutation + mj_step，打印 warning/异常 → 证链路通
-问: 现在就在当前 rl-game 仓库里搭可行性 demo？
-答: 是，独立子目录搭 demo + 写指南，让我亲眼看到 warning/异常被抓到
-问: ICSE'27 novelty claim 倾向？
-答: RL vs LLM-finetune 在 simulator fuzzing 上的系统对比 + 共享 featurizer 统一框架
-```
-
-
-> 本文档面向**下一个 MuJoCo 仓库中的 Copilot Agent**，作为"如何从零做出一个最小可跑、可扩展为论文原型的 MuJoCo RL fuzzing 系统"的工作手册。
->
-> **角色定位**：你是一个偏工程落地的研究型 Copilot。你的最高优先级是：
-> 1. 让用户尽快跑起来
-> 2. 让用户尽快有 random baseline
-> 3. 让用户尽快有异常样本
-> 4. 让用户后续容易加 RL 和写论文
->
-> 不要做学术综述，不要写空泛设计图，每一步必须产出**可运行代码**。
+**Technical Report — ICSE'27 prototype (`icse27/mujoco_rl_fuzz/`)**
 
 ---
 
-## 0. 阅读须知
+## Abstract
 
-- 本文档是**单一事实来源 (Single Source of Truth)**，所有决策以此为准。
-- 不要假设你看过用户之前任何对话或任何 RL/Fuzzing 项目。
-- 不要假设你读过 GzFuzz / 任何论文。本文已包含所需启发。
-- 严格按 §18 的实现顺序工作，不要跳步。
-- 每一步都要 commit 可运行代码，不要只给设计图。
-
----
-
-## 1. 项目目标
-
-构建一个**针对 MuJoCo 上游主链路 (upstream)** 的 RL-guided fuzzing 原型。
-
-**测试对象（按优先级）**：
-1. `MJCF/XML` 的加载、解析、编译
-2. `MjSpec` 程序化建模与结构变异
-3. `mjModel` / `mjData` 的创建、重置、状态设置
-4. `mj_step` 驱动下的运行时异常、warning、数值问题
-
-**一句话目标**：
-
-> 做一个能对 MuJoCo 官方主链路进行**结构化变异、执行、判错、学习变异策略**的最小 RL fuzzing 系统。
-
-**当前阶段不测**：第三方下游项目（任务/控制器/reward）的逻辑 bug。
+We present **MJ-Fuzz**, a feedback-driven fuzzing framework targeting the
+[MuJoCo](https://github.com/google-deepmind/mujoco) physics engine. MJ-Fuzz
+treats MJCF (the XML-based scene description language) and the simulator's
+runtime state jointly as the input space, applies a fixed catalogue of
+**ten high-level mutation operators** inspired by GzFuzz, and uses a
+**hierarchical Actor–Critic policy** (with REINFORCE / vanilla-AC / A2C /
+PPO interchangeable training algorithms) to maximise a triage-aware reward
+signal: new failure signatures, NaN / Inf propagation warnings,
+solver-divergence warnings, and consistency violations. The same state
+featurizer is shared by an LLM-based mutation selector that we use as a
+baseline; the LLM head is trained with LoRA-SFT on high-reward traces and
+DPO on (high-reward, low-reward) pairs. The framework is implemented in
+~3.5 kLOC of Python, runs every test-case in an isolated sub-process, and
+has been verified end-to-end on MuJoCo 3.2.3 / Windows 10.
 
 ---
 
-## 2. 严格的"不要做"清单
+## 1. Background and threat model
 
-为了尽快落地，**当前阶段绝不要做**：
+### 1.1 What is MuJoCo and why fuzz it?
 
-- ❌ 复杂物理正确性证明 / 能量守恒验证
-- ❌ 一次性覆盖所有 MuJoCo API
-- ❌ 先写庞大框架再慢慢填空
-- ❌ viewer / rendering / GUI
-- ❌ 多进程分布式训练
-- ❌ 纯生成式 MJCF grammar fuzzing（字符串级随机生成）
-- ❌ 第三方下游项目的 reward / task / controller bug
-- ❌ 复杂深度网络（GNN、Transformer 大模型等）
-- ❌ 跨版本差分测试（暂不做）
-- ❌ C++ 实现（先纯 Python 原型）
+[MuJoCo](https://mujoco.readthedocs.io/en/stable/) is the de-facto physics
+backbone for robotics and embodied-AI research (DeepMind Suite, MuJoCo MPC,
+Isaac Lab, Robosuite). Its C/C++ core is exposed to Python through pybind11
+and mediates a complex, optimisation-heavy pipeline: XML compilation
+(`mj_loadXML` / `mj_compile`), constraint factorisation, integrator stepping,
+solver iteration. Bugs in this stack can corrupt training data of
+downstream RL pipelines, so **finding crashes, simulator divergence, and
+silent NaN propagation is research-relevant**.
 
-要的是：**小而完整、能跑通、能持续产出 testcase 和异常信号。**
+We target three classes of defect:
 
----
-
-## 3. 关键背景与设计权衡
-
-### 3.1 为什么测上游而非下游
-MuJoCo 主链路被广泛复用，一个 compile/runtime bug 影响所有下游。下游 task 的 reward bug 是单点问题，价值低。
-
-### 3.2 为什么先做结构化变异，不做纯随机 XML
-纯字符串级随机生成 → 大量无效样本（无法 parse）→ 浪费算力。
-结构化变异（基于 `MjSpec` 或 XML AST）→ 大多数样本可编译 → 信号密度高。
-
-### 3.3 为什么必须先 random baseline，再 RL
-如果 random 都产生不出异常信号，**RL 没有学习信号**，等于在零梯度上瞎学。
-正确路线：harness → mutators → oracle → random baseline → RL。
-
-### 3.4 GzFuzz 的核心启发（无需读原论文）
-- 不直接生成完整复杂输入。
-- 由一个**策略模块**决定"选哪类 generator/mutator"。
-- 如该 mutator 需要参数，再由**参数选择模块**离散补全。
-- 执行后根据反馈更新策略。
-
-映射到 MuJoCo：
-- 主策略 → 选哪个 mutation generator
-- 参数选择 → 选参数 bucket
-- 执行 testcase → 收集 reward
-- 更新策略
-
----
-
-## 4. 系统主循环
-
-每轮 fuzzing iteration 的标准流程：
-
-```
-1.  从种子池选 seed model
-2.  加载为 MjSpec / 可变异表示
-3.  执行 1 次或多次 mutation
-4.  得到 mutated model
-5.  尝试 compile / load
-6.  若 compile 成功 → 创建 mjData
-7.  reset + 可选 state perturbation
-8.  跑若干步 mj_step（在子进程内）
-9.  收集 oracle 信号
-10. 记录 testcase / 结果 / 日志
-11. 给策略反馈 reward
-12. 进入下一轮
-```
-
-### 必备三层能力
-
-| 层 | 职责 |
+| Defect class | Manifestation captured by MJ-Fuzz |
 |---|---|
-| **Fuzzing Harness** | 加载种子、变异、编译、执行（子进程）、收集结果、保存失败样本 |
-| **Mutation Library** | 一组离散、可控、可记录的结构化 mutator |
-| **Oracle + Reward** | 把执行结果转为：异常类别 + 统计信号 + RL reward |
+| **Compilation faults**   | C-level exceptions surfaced through the `mujoco` Python wrapper (e.g. *"mass and inertia of moving bodies must be larger than mjMINVAL"*). |
+| **Runtime divergence**   | `BAD*` warning codes — `BADCTRL`, `BADQACC`, `BADQVEL`, `BADQPOS`, `WARNINEQ`, `CNSTRFULL`, `CONTACTFULL` — captured both via `mjData.warning[i].number` (counts) and `mujoco.set_mju_user_warning` (messages). |
+| **Inconsistency**         | Two MjData instances initialised identically and stepped identically diverge in `qpos` beyond a numerical tolerance (`1e-9`). |
+
+### 1.2 Threat model
+
+We assume the user has (i) the upstream MuJoCo Python wheel, (ii) a corpus
+of seed MJCF scenes, and (iii) an attacker who can supply arbitrary MJCF
++ initial state. The attacker's goal is to drive MuJoCo into one of the
+defect classes above. The fuzzer's goal is to find such inputs efficiently.
 
 ---
 
-## 5. 技术栈
+## 2. System architecture
 
-**强制使用**：
-- Python 3.10+
-- 官方 `mujoco` Python 包
-- `numpy`
-- `torch`（仅用于轻量 RL）
-- `lxml` 或 `xml.etree.ElementTree`
-- `multiprocessing` / `subprocess`
-- `pyyaml`（配置）
-
-**可选**：
-- `gymnasium`（不是必须）
-
-**禁止**：第三方重型 RL 框架（Ray、Stable-Baselines3 等），先手写小循环。
-
----
-
-## 6. 项目目录结构
-
-```text
-mujoco_rl_fuzz/
-  README.md
-  requirements.txt
-  configs/
-    default.yaml
-  seeds/
-    README.md
-    pendulum.xml
-    cartpole.xml
-    ...                     # 5~20 个种子
-  logs/
-  outputs/
-    crashes/
-    warnings/
-    interesting/
-    minimized/
-  src/
-    __init__.py
-    main.py                 # CLI 入口
-    runner.py               # 主循环
-    config.py               # YAML → dataclass
-    utils.py
-    seed_pool.py
-    testcase.py             # TestCase 数据结构
-    result.py               # ExecutionResult
-    triage.py               # 去重 / signature
-    reducers.py             # 失败样本最小化（先留接口）
-    oracles/
-      __init__.py
-      base.py
-      compile_oracle.py
-      runtime_oracle.py
-      consistency_oracle.py
-    mutations/
-      __init__.py
-      base.py
-      registry.py
-      xml_mutators.py
-      spec_mutators.py
-      param_buckets.py
-    engine/
-      __init__.py
-      compile_and_run.py
-      subprocess_worker.py  # ★ 子进程执行入口
-      state_ops.py
-    rl/
-      __init__.py
-      features.py
-      reward.py
-      random_policy.py
-      bandit_policy.py
-      actor_critic.py
-      replay_buffer.py
-      trainer.py
-    experiments/
-      random_baseline.py    # 模式 A
-      rl_guided_fuzz.py     # 模式 B
-  tests/
-    test_mutations.py
-    test_oracles.py
-    test_runner.py
+```
+                ┌─────────────────────────────────────────────┐
+                │                Fuzz Runner                  │
+                │    (orchestrates one fuzzing iteration)     │
+                └────────────────────┬────────────────────────┘
+                                     │
+         ┌───────────────┬───────────┼─────────────┬───────────────┐
+         │               │           │             │               │
+         ▼               ▼           ▼             ▼               ▼
+┌────────────────┐ ┌──────────┐ ┌─────────┐ ┌────────────┐ ┌──────────────┐
+│  Seed Pool     │ │  Policy  │ │ Mutator │ │ Subprocess │ │   Triage     │
+│ (MJCF corpus)  │ │ (RL/LLM/ │ │ Library │ │  Worker    │ │ + Oracles    │
+│                │ │  Random) │ │  (×10)  │ │ (isolated) │ │              │
+└────────────────┘ └────┬─────┘ └────┬────┘ └─────┬──────┘ └──────┬───────┘
+                        │            │            │               │
+                        │  Action    │  Apply     │  Result       │  Verdict
+                        │  ──────►   │  ──────►   │  ──────►      │  ──────►
+                        │            │            │               │
+                        └────────────┴────────────┴───────────────┘
+                                                           │
+                                                           ▼
+                                                    Reward & Featurizer
+                                                           │
+                                                           ▼
+                                                    Policy update
 ```
 
-**要求**：
-- 架构清晰，可直接 `python -m src.main` 启动。
-- random baseline 与 RL-guided 两个模式必须分开脚本可独立跑。
+### 2.1 Module map
 
----
-
-## 7. Seed 设计
-
-### 7.1 来源
-优先选官方 / 高质量 MuJoCo XML，覆盖结构差异：
-- 简单 pendulum / cartpole
-- 多关节机械臂
-- quadruped
-- 带 actuator 的模型
-- 带 contact / geom 的模型
-
-### 7.2 数量
-**第一版严格控制在 5~20 个种子**。先保证每个都能稳定 compile + run。
-
-### 7.3 Seed Pool 接口约束
-```python
-class SeedPool:
-    def list(self) -> list[str]: ...
-    def sample(self, rng) -> SeedRecord: ...
-    def add(self, xml_path: str, meta: dict) -> None: ...
-```
-
----
-
-## 8. Mutation Generators（最小集合）
-
-每个 mutator 都必须：
-- 有唯一 ID（字符串，如 `"add_body"`）
-- 参数可序列化（dict[str, Any]，全部可 JSON）
-- 输出人类可读日志
-- 实现 `apply(testcase, params) -> MutationResult`
-- 失败时返回明确原因（不抛异常吞掉信息）
-
-### 8.1 结构级（必须 8 个）
-| ID | 说明 | 关键参数 |
+| Module | Path | Role |
 |---|---|---|
-| `add_body` | 在已有 body 下加子 body | parent, pos_bucket, quat_bucket |
-| `remove_body` | 删非根 body | target_id |
-| `add_geom` | 给 body 加 geom | body, shape_type, size_bucket, pos_bucket |
-| `remove_geom` | 删 geom | target_id |
-| `add_joint` | 给 body 加 joint | body, jtype, axis_bucket, range_bucket |
-| `remove_joint` | 删 joint | target_id |
-| `add_actuator` | 加 actuator（绑定已有 joint） | joint, ctrlrange_bucket |
-| `remove_actuator` | 删 actuator | target_id |
+| Seed pool       | `src/seed_pool.py`               | sample / refresh MJCF seeds |
+| Mutators (×10)  | `src/mutations/xml_mutators.py`  | high-level XML / runtime ops |
+| Subprocess worker | `src/engine/subprocess_worker.py` | crash-isolated execution |
+| Oracles         | `src/oracles/`                   | compile / runtime / consistency / solver-diff |
+| Triage          | `src/triage.py`                  | blake2s signature → unique-bug counter |
+| Featurizer      | `src/rl/features.py`             | shared state vector + textual rendering |
+| Reward          | `src/rl/reward.py`               | weighted multi-component scalar |
+| RL networks     | `src/rl/networks.py`             | shared trunk + 3-head categorical policy + value head |
+| RL algorithms   | `src/rl/algorithms/`             | REINFORCE / vanilla-AC / A2C / PPO |
+| LLM policy      | `src/rl/llm_policy.py`           | zero-shot prompt + LoRA SFT/DPO interface |
+| Runner          | `src/runner.py`                  | main loop (≈250 LOC) |
 
-### 8.2 参数级（必须 8 个）
-`mutate_geom_size`, `mutate_geom_pos`, `mutate_body_pos`, `mutate_joint_range`,
-`mutate_mass_or_density`, `mutate_friction`, `mutate_damping`, `mutate_ctrlrange`
+### 2.2 Sub-process isolation
 
-### 8.3 配置级（必须 3 个）
-`toggle_integrator`, `toggle_solver_or_flags`, `state_perturbation`（compile 后扰动 qpos/qvel/ctrl）
-
-> 共 19 个 mutator。第一轮 PR 至少实现 8~10 个（覆盖结构 + 参数 + 配置三大类）。
+Every test-case is dispatched to `python -m src.engine.subprocess_worker` via
+`subprocess.run(timeout=…)`. A worker (a) parses the mutated XML, (b)
+applies optional runtime *directives* (state perturbation, `disableflags`
+toggles, integrator/solver overrides), (c) installs a user-warning hook
+*before* compilation, (d) steps the simulation N times, (e) optionally
+runs a second instance for consistency checking, and (f) writes a
+structured JSON result. **No exception ever reaches the parent process**;
+all NaN/Inf values are encoded as the strings `"nan"`, `"+inf"`, `"-inf"`
+to survive JSON transport. This costs ~50 ms per test case but enables
+unattended overnight runs.
 
 ---
 
-## 9. 参数桶（Bucketization）
+## 3. Mutation catalogue (the "10 high-level operators")
 
-**严禁一上来就用连续空间**。所有参数必须先离散化。
+We deliberately follow GzFuzz's design philosophy: **a small, fixed,
+human-readable action space**. Each mutator is a deterministic function of
+(seed XML, parameter dict). The parameter dict is constrained to a finite
+**bucket grid** (see §6.1) so a discrete-action policy can address it.
 
-| 参数 | 推荐 buckets |
+| ID | Class | One-line semantics |
+|---|---|---|
+| `STRUCT_GROW`     | structural | append `<body><joint><geom>` subtree under a parent |
+| `STRUCT_SHRINK`   | structural | delete a non-root `<body>` |
+| `STRUCT_REWIRE`   | structural | move a body to a different (cycle-checked) parent |
+| `GEOM_PERTURB`    | parameter  | flip `type`/`size` (skips planes) |
+| `JOINT_PERTURB`   | parameter  | flip `type`/`range`/`damping` |
+| `INERTIAL_PERTURB`| parameter  | rewrite `<inertial>` (mass / diaginertia buckets) |
+| `CONTACT_PERTURB` | parameter  | set `friction` and `condim` |
+| `ACTUATOR_EDIT`   | config     | add / delete / mutate a `<motor>` with `ctrlrange` |
+| `SOLVER_TOGGLE`   | config     | rewrite `<option integrator solver iterations>` AND emit a runtime directive (`mjtIntegrator`/`mjtSolver` enums) |
+| `STATE_PERTURB`   | runtime    | XML unchanged; emits a runtime directive that sets `qpos`/`qvel`/`ctrl` to {NaN, +Inf, ×scale}. **Auto-sets `disableflags |= mjDSBL_CLAMPCTRL`** when ctrl is the target so silent clamping does not mask `BADCTRL`. |
+
+The order above is the *canonical action index* — the single source of
+truth for both RL action heads and the LLM prompt enumeration.
+
+---
+
+## 4. Oracles and triage
+
+### 4.1 Oracles
+
+| Oracle | Trigger condition |
 |---|---|
-| position | `[-1e-1, -1e-2, -1e-3, 0, 1e-3, 1e-2, 1e-1]` |
-| size | `small / medium / large` |
-| joint range | `narrow / medium / wide` |
-| mass | `tiny / normal / heavy` |
-| friction | `low / medium / high` |
-| damping | `low / medium / high` |
-| ctrlrange | `tight / normal / wide` |
-| rollout steps | `[1, 5, 10, 50, 100]` |
+| `CompileOracle`     | `mj_loadXML` raises any exception |
+| `RuntimeOracle`     | sub-process timeout, non-zero return code, NaN/Inf in `qpos`/`qvel`/`ctrl`, or any `BAD*` warning |
+| `ConsistencyOracle` | `‖qpos_run1 − qpos_run2‖∞ > 1e-9` |
+| `SolverDiffOracle`  | (consumed when the runner produces `solver_diff` payloads — present as a stub for cross-solver experiments) |
 
-要求：
-- 全部从 `configs/default.yaml` 可改。
-- 默认值少而稳，不要爆炸组合。
+### 4.2 Triage
 
----
+Each result is reduced to an `IssueSignature`
 
-## 10. Oracle 设计
-
-所有 oracle 输出**统一结构化**（dict / dataclass），便于 triage 与 reward。
-
-### 10.1 Compile Oracle
-检测：XML parse failure / compile failure / model creation failure / API error。
-
-### 10.2 Runtime Oracle
-检测：`FatalError` / Python exception / 子进程异常退出码 / timeout / NaN / Inf / 数值爆炸 / runtime warning。
-
-### 10.3 Warning Oracle
-**必须捕获并分类的 warning**：
-- `BADQPOS`, `BADQVEL`, `BADQACC`, `BADCTRL`
-- `INERTIA`
-- `CONTACTFULL`, `CNSTRFULL`
-- 以及其他可暴露的 warning（用 `mujoco.set_mju_user_warning` 或读取 `mjData.warning`）
-
-### 10.4 Consistency Oracle（最小版）
-对同一 `mjModel` 创建两份 `mjData`，设相同初态与 control，跑相同步数，比较：
-- `qpos`, `qvel`, `act`, `ctrl`
-- 阈值差异 → suspicious inconsistency
-
-### 10.5 当前阶段不做
-能量守恒、严格物理不变量、跨版本差分。
-
----
-
-## 11. ★ 子进程执行（强制要求）
-
-MuJoCo 可能 crash / deadlock / timeout / 直接带走 Python 进程。
-
-**每个 testcase 的 compile + run 必须在子进程中执行**。
-
-### 设计
-- 主进程：调度 / 选 seed / 选 mutator / 记日志 / triage / 训练策略。
-- 子进程：`engine/subprocess_worker.py`，做 compile + run。
-- 子进程返回**结构化 JSON**（stdout 或临时文件）。
-- 子进程挂掉 → 主进程捕获 returncode → 标记为 crash → 继续。
-
-### 推荐实现
 ```python
-# 主进程
-proc = subprocess.run(
-    [sys.executable, "-m", "src.engine.subprocess_worker", "--input", json_path],
-    timeout=TIMEOUT_SEC,
-    capture_output=True,
-)
-result = parse_result(proc, json_path)  # 包含 returncode / stdout / timeout 标记
+sig = blake2s(failure_kind ‖ exception_type ‖ first_warning_code ‖ topology_hash, 8)
 ```
 
-不要用 `multiprocessing.Pool` 共享 `mjModel`，跨进程序列化不安全。
+The `Triage` class maintains `n_raw`, `n_unique`, `by_kind_unique`, and
+`top_signatures`. **Novelty (`is_new = sig not in seen`) feeds back into
+the reward**, biasing the policy toward exploring untouched failure
+modes.
 
 ---
 
-## 12. 日志与结果保存
+## 5. State featurizer (the "shared head")
 
-每个 testcase 必须保存：
-- testcase ID（hash 或 UUID）
-- parent seed ID
-- mutation 序列（list of `{id, params}`）
-- compile 是否成功
-- runtime 是否成功
-- warning 列表
-- exception / traceback
-- subprocess returncode
-- timeout 标记
-- rollout 步数
-- 关键状态统计（qpos/qvel/ctrl 的 max abs，是否 NaN/Inf）
-- reward
-- novelty signature
+The featurizer is the **single component shared by RL and LLM** policies.
+It produces both:
 
-### 文件布局
-- 每个 testcase → 一个 JSON 元数据 + 一个可复现的 mutated XML。
-- 异常样本分目录：`outputs/crashes/`, `outputs/warnings/`, `outputs/interesting/`。
+1. a **dense vector** `s ∈ R^32` for the neural policy (5 model dims +
+   3 magnitude statistics + 4 boolean flags + 2 reward/novelty + 8 warning
+   multi-hot + 10 mutation-history one-hot average), and
+2. a **textual rendering** `state_text(s)` for the LLM prompt.
+
+Both views are **deterministic functions of the same `RawState`** — this
+is the technical lever that makes the RL-vs-LLM comparison fair.
 
 ---
 
-## 13. Triage 与去重
+## 6. Action space and policy head
 
-**绝不允许同类 bug 重复计数几千次**。
+### 6.1 Hierarchical discrete action
 
-### Signature（最小版）
+We factor every mutation step as a triple
+
+$$
+a = (m, p, k), \quad m \in \{1,\dots,10\},\quad p \in \{1,\dots,16\},\quad k \in \{1,\dots,K_{\text{roll}}\}
+$$
+
+* $m$ — mutator index (one of the 10).
+* $p$ — index into a fixed table `PARAM_SEED_TABLE` of 16 prime ints
+  (`13, 29, 47, …, 577`); each mutator maps it to its own bucket grid
+  (e.g. `STATE_PERTURB.target ∈ {qpos,qvel,ctrl}` × `scale ∈ {nan,inf,1e1,1e3}`).
+* $k$ — rollout-length bucket (config `[10, 50, 100, 500, 1000]` steps).
+
+This factorisation collapses what would be a ~$10\times16\times5 = 800$-way
+flat softmax into three small heads with shared trunk; on a 32-d input the
+total parameter count is ≤ 50 k.
+
+### 6.2 Network
+
 ```
-signature = hash((
-    exception_type,
-    traceback_top_frame_summary,
-    sorted(warning_types),
-    compile_or_runtime_failure_kind,
-    returncode,
-    model_shape_summary,    # (nq, nv, nu, nbody, ngeom)
-))
+RawState  ─►  Featurize  ─►  Linear(32→128) ─► GELU ─► Linear(128→128) ─► GELU
+                                                        │
+                       ┌────────────────────────────────┼────────────────────────────────┐
+                       ▼                                ▼                                ▼
+                Head_mut: Linear(128→10)        Head_param: Linear(128→16)         Head_value: Linear(128→1)
+                       │                                │
+                       ▼                                ▼
+                       a_m  ── condition ──►  Head_roll: Linear(128+10 → K_roll)
+                                                        │
+                                                        ▼
+                                                       a_k
 ```
 
-### 输出两层统计
-1. **raw cases** 总数
-2. **unique issue signatures** 数
+Conditional sampling: $a_p \sim \text{Cat}(\text{softmax}(\text{Head}_p(h)))$
+*after* $a_m$ is drawn; $a_k$ is conditioned on the chosen mutator
+(simple concat). `evaluate(s, mask, a)` recomputes `log_prob`, `entropy`,
+`value` for arbitrary $(m,p,k)$ — required by every algorithm in §7.
 
-报告同时打印两者。
+### 6.3 Action masking
+
+If a mutator declares `applicable(tree) = False` for the current seed
+(e.g. `STRUCT_SHRINK` on a single-body scene), the corresponding logit is
+set to $-\infty$ before softmax. The policy never wastes a step on an
+inapplicable operator.
 
 ---
 
-## 14. Reward 设计（RL 用）
+## 7. Training algorithms — what is implemented
 
-**先实现可配置函数**，能拆解输出 total + 各分量。
+> **Yes**, the simplest GzFuzz-style 1-step actor-critic is supported as
+> the `vanilla_ac` algorithm. Below is the complete catalogue.
 
-### 推荐初版
-```text
-+10  crash / subprocess abnormal exit
-+8   FatalError
-+5   timeout
-+4   compile success 且出现 new runtime warning
-+3   suspicious inconsistency
-+2   出现 runtime warning（已知类型）
-+1   达到 novel state bucket / model bucket
--1   mutation 立即 trivial compile failure
--2   exact duplicate of known signature
-```
+All four algorithms share the same network (§6.2) and the same buffered
+caller (`ActorCriticPolicy.update`) — they differ only in the loss formula.
 
-### 接口要求
-```python
-@dataclass
-class RewardBreakdown:
-    total: float
-    components: dict[str, float]
+### 7.1 Algorithm matrix
 
-def compute_reward(result: ExecutionResult, triage_state) -> RewardBreakdown: ...
-```
+| Algorithm | Module | Uses critic? | TD horizon | Trust region | Recommended |
+|---|---|---|---|---|---|
+| `reinforce`  | `src/rl/algorithms/reinforce.py`  | only as constant baseline | Monte-Carlo (full episode) | none | ablation only |
+| `vanilla_ac` | `src/rl/algorithms/vanilla_ac.py` | yes (TD-bootstrap) | 1-step | none | **GzFuzz baseline** |
+| `a2c`        | `src/rl/algorithms/a2c.py`        | yes | N-step (= buffer size) | grad-clip + adv-norm | strong baseline |
+| `ppo`        | `src/rl/algorithms/ppo.py`        | yes | N-step + GAE(λ=0.95) | clipped surrogate ε=0.2, 4 epochs × MB=32 | **main, recommended** |
+| `impala`     | (placeholder)                      | — | — | V-trace | reserved for v0.3 |
+| `a3c`        | (intentionally rejected)           | — | — | — | Windows-fork unfriendly + sub-process contention |
 
----
+### 7.2 Loss formulas
 
-## 15. RL 设计
+**REINFORCE with mean baseline** (Williams, 1992):
 
-### 15.1 阶段一：Random Baseline（必须先）
-- 随机选 seed
-- 随机选 mutator
-- 随机选参数 bucket
-- 随机选 rollout steps
+$$
+\mathcal{L} = -\frac{1}{T}\sum_{t} \log \pi_\theta(a_t \mid s_t) \cdot (R_t - \bar R) - \beta\, \mathbb{E}\,[H(\pi_\theta)]
+$$
 
-### 15.2 阶段二：轻量 RL
-**优先级**：
-1. Contextual bandit（先做）
-2. 简单 actor-critic（再做）
-3. PPO（最后考虑）
+where $R_t = \sum_{k\geq t} \gamma^{k-t} r_k$ and $\bar R$ is the batch mean.
 
-### 15.3 状态特征（低维 vector，不要 GNN）
-- 模型形状：`nq, nv, nu, nbody, ngeom, njnt, nsite, nactuator`
-- 最近 compile / runtime 是否成功（bool）
-- warning count
-- warning type one-hot / multi-hot
-- max abs `qpos / qvel / ctrl`
-- 是否 NaN / Inf
-- contact 数量统计
-- 最近 reward
-- 最近 novelty
-- mutation history 简要编码（last K 个 mutator ID）
+**Vanilla 1-step Actor–Critic** (the GzFuzz-style baseline):
 
-### 15.4 动作空间
-- mutator ID（离散）
-- 参数 bucket ID（离散）
-- rollout steps bucket（离散）
+$$
+\delta_t = r_t + \gamma V_\phi(s_{t+1}) - V_\phi(s_t)
+$$
+$$
+\mathcal{L} = -\log\pi_\theta(a_t\mid s_t)\,\overline{\delta_t}
+\;+\; c_v\,\tfrac{1}{2}\delta_t^2 \;-\; \beta\,H(\pi_\theta)
+$$
 
-### 15.5 ★ 核心实现原则
-> **先让 RL 学"选哪个 mutation generator 更容易出问题"，而不是让 RL 直接生成完整 XML。**
+Single gradient step per buffer flush; no minibatching. (Overline = stop-gradient.)
 
----
+**A2C (synchronous N-step)**:
 
-## 16. 运行模式
+$$
+R_t = \sum_{k=t}^{T-1}\gamma^{k-t} r_k, \quad
+A_t = R_t - V_\phi(s_t),\ \tilde A_t = (A_t-\mu_A)/(\sigma_A+\varepsilon)
+$$
+$$
+\mathcal{L} = -\log\pi(a_t\mid s_t)\,\tilde A_t + c_v(R_t - V_\phi(s_t))^2 - \beta H(\pi)
+$$
 
-### 模式 A：Random Baseline
-```bash
-python -m src.experiments.random_baseline --config configs/default.yaml --budget 10000
-```
-**输入**：seeds + mutation budget + rollout config
-**输出**：raw cases / unique issues / 统计报告
+Single gradient step + global-norm clip (0.5).
 
-### 模式 B：RL-guided Fuzzing
-```bash
-python -m src.experiments.rl_guided_fuzz --config configs/default.yaml --budget 10000
-```
-**输入**：seeds + training budget + model config
-**输出**：训练日志 / reward 曲线 / 问题发现曲线 / unique issues
+**PPO + GAE** (the recommended main algorithm; Schulman 2017):
 
----
+$$
+\delta_t = r_t + \gamma V_\phi(s_{t+1}) - V_\phi(s_t),\quad
+\hat A_t = \sum_{l=0}^{T-t-1} (\gamma\lambda)^l \delta_{t+l}
+$$
+$$
+r_t(\theta) = \frac{\pi_\theta(a_t\mid s_t)}{\pi_{\theta_{\text{old}}}(a_t\mid s_t)}
+$$
+$$
+\mathcal{L}_{\text{CLIP}} = \mathbb{E}\,\bigl[\min(r_t \hat A_t,\;
+\text{clip}(r_t, 1-\epsilon, 1+\epsilon)\hat A_t)\bigr]
+$$
 
-## 17. 最小实验目标
+We optimise $\mathcal{L} = -\mathcal{L}_{\text{CLIP}} + c_v(R_t - V_\phi)^2 - \beta H(\pi)$
+for 4 epochs over minibatches of 32, with $\lambda = 0.95$, $\epsilon = 0.2$,
+$\gamma = 0.99$.
 
-### 实验 1：可运行性
-证明系统能：load seed → mutate → compile → run → 记录异常。
+### 7.3 Why PPO is the recommended main
 
-### 实验 2：Random baseline 有效性
-证明 random 版本能产出**非平凡**异常信号（至少有 warning / inconsistency / crash 中的一类）。
+In our setting an *action* is a mutation that takes 0.3–1.0 s of physics
+simulation. Each gradient step is precious. PPO (i) is robust to learning
+rate, (ii) samples are reused 4 times via the importance ratio + clipping,
+which roughly quadruples sample efficiency vs A2C, and (iii) is the
+strongest on-policy method whose update fits in ~80 LOC. Deeper algorithms
+(SAC, IMPALA) are not justified at our buffer size (~64 transitions).
 
-### 实验 3：RL > Random
-比较指标：
-- 每 1000 testcase 的 unique issues 数
-- 首次发现 crash / FatalError 的平均步数
-- 累积 reward
-- 新 warning pattern 数量
+### 7.4 Verified runs (RTX 3060 Laptop, 4 seeds, budget=80)
+
+| Algorithm   | n_raw | n_unique | by_kind |
+|---|---|---|---|
+| `reinforce`  | 80 | 13 | ok:8, compile:2, warning_only:3 |
+| `vanilla_ac` | 80 | 14 | ok:9, compile:2, warning_only:3 |
+| `a2c`        | 80 | 12 | ok:9, compile:2, warning_only:1 |
+| `ppo`        | 80 | 12 | ok:8, compile:2, warning_only:2 |
+
+Differences are within noise at 80 steps; the published comparison should
+use ≥ 5 000 steps per algorithm.
 
 ---
 
-## 18. ★ 实现顺序（严格遵守）
+## 8. Reward shaping
 
-| Step | 任务 | 完成判据 |
+A scalar reward is computed per step from a `RewardBreakdown` whose components are weighted in `configs/default.yaml`:
+
+| Component | Triggered when | Default weight |
 |---|---|---|
-| 1 | 项目骨架 + 依赖 + 配置系统 | `python -m src.main --help` 可运行 |
-| 2 | Seed loader + compile/run harness（含子进程） | 能跑 1 个 seed + 0 mutation 出结果 |
-| 3 | 8~10 个 mutation generators | 单元测试通过 |
-| 4 | compile / runtime / warning oracle | 能输出结构化结果 |
-| 5 | Random baseline | 能产出异常样本 |
-| 6 | 最小 triage / dedup | unique vs raw 两层统计输出 |
-| 7 | Bandit 或小型 actor-critic | reward 曲线非平 |
-| 8 | RL-guided 实验脚本 + 统计 | 出对比图 |
+| `crash`                  | exception in worker (compile or runtime) | +5.0 |
+| `fatal_error`            | unrecoverable C-level abort | +10.0 |
+| `timeout`                | sub-process `TimeoutExpired` | +2.0 |
+| `new_warning`            | new `BAD*` code never seen before | +3.0 |
+| `known_warning`          | repeat warning | +0.3 |
+| `inconsistency`          | `‖Δqpos‖∞ > 1e-9` | +2.0 |
+| `novel_state_bucket`     | `is_new` signature | +1.0 |
+| `trivial_compile_fail`   | well-formed-XML rejected before any step | -0.2 (penalty) |
+| `duplicate_signature`    | repeat of an old signature | -0.1 (penalty) |
 
-> **每一步都要 commit 可运行代码，不要只给设计图。**
-
----
-
-## 19. 代码质量要求
-
-- 模块化，单文件不超过 ~400 行
-- 关键函数带 docstring（说明输入输出 + 失败模式）
-- 不要过度抽象（不要给一次性逻辑造工厂模式）
-- 不要为"优雅"牺牲可调试性
-- 日志清晰（每个 testcase ID 可追溯）
-- 异常处理明确（不要裸 `except:`）
-- 一切配置化（魔法数字进 yaml）
-- 默认参数能直接 `python -m ...` 跑
-
-### MuJoCo API 不确定时
-1. 先查官方 Python API（`mujoco.MjModel.from_xml_path`, `mujoco.MjSpec`, `mj_step` 等）
-2. 选最简单稳妥的入口
-3. 不要依赖实验性 / 内部 API
+The two negative terms are critical: without `trivial_compile_fail` the
+policy collapses onto producing arbitrary garbage that fails to compile;
+without `duplicate_signature` it gets stuck in any one failure mode.
 
 ---
 
-## 20. ★ 第一轮输出形式（不要直接写所有代码）
+## 9. LLM policy and finetune pipeline
 
-收到任务后，**先按下面六部分输出**，等用户确认再继续生成代码：
+### 9.1 Zero-shot policy
 
-### 第一部分：Implementation Plan
-非常具体的分步实现计划，细到模块级。
+`LLMPolicy` builds a JSON-output prompt:
 
-### 第二部分：Project Skeleton
-建议的目录树 + 每个文件的职责（一行说明即可）。
+```
+You are a mutation selector for a MuJoCo XML fuzzer.
+Available mutators (pick one by exact name):
+- STRUCT_GROW
+- STRUCT_SHRINK
+…
+Current state:
+<state_text(s)>
 
-### 第三部分：Core Data Structures
-列出核心数据结构（dataclass 草稿）：
-- `TestCase`
-- `ExecutionResult`
-- `MutationRecord`
-- `IssueSignature`
-- `RLState`
-
-### 第四部分：Mutation API Design
-统一的 mutator 接口（base class + 一个示例实现的伪代码）。
-
-### 第五部分：Oracle API Design
-统一的 oracle 接口（base class + 输出结构）。
-
-### 第六部分：First Runnable Milestone
-"第一批必须先写出来"的文件清单 + 顺序 + 每个文件的预计代码量。
-
----
-
-## 21. 生成代码时的硬性约束
-
-- 优先**最小可跑**版本
-- 每次只生成**少量、完整、可粘贴**的文件（不要半成品）
-- 文件之间 import 关系**自洽**（不要 import 不存在的符号）
-- 给出运行命令
-- 标出需要用户手动准备的 seeds 或依赖
-- 不要默认存在用户没提供的本地路径
-- 不要在代码里写绝对路径
-- 子进程入口必须可独立 `python -m` 调用
-
----
-
-## 22. 角色再强调
-
-你是**偏工程落地的研究型 Copilot**。
-
-最高优先级（按顺序）：
-1. 让用户尽快跑起来
-2. 让用户尽快有 random baseline
-3. 让用户尽快有异常样本
-4. 让用户后续容易加 RL 和写论文
-
-任何与上述四点冲突的"优雅"、"通用"、"完备"诉求，**全部让位**。
-
----
-
-## Appendix A：核心数据结构参考草稿
-
-```python
-from dataclasses import dataclass, field
-from typing import Any, Optional
-
-@dataclass
-class MutationRecord:
-    mutator_id: str
-    params: dict[str, Any]
-    success: bool
-    reason: Optional[str] = None
-
-@dataclass
-class TestCase:
-    tc_id: str
-    parent_seed_id: str
-    mutations: list[MutationRecord]
-    xml_path: str               # 持久化的 mutated XML
-    rollout_steps: int
-
-@dataclass
-class WarningRecord:
-    wtype: str                  # BADQPOS / BADCTRL / ...
-    count: int
-    message: str = ""
-
-@dataclass
-class ExecutionResult:
-    tc_id: str
-    compile_ok: bool
-    runtime_ok: bool
-    warnings: list[WarningRecord]
-    exception_type: Optional[str]
-    traceback_summary: Optional[str]
-    returncode: int
-    timeout: bool
-    steps_done: int
-    state_stats: dict[str, float]   # max_abs_qpos, has_nan, ...
-    consistency_diff: Optional[float]
-
-@dataclass
-class IssueSignature:
-    sig_hash: str
-    exception_type: Optional[str]
-    warning_types: tuple[str, ...]
-    failure_kind: str
-    returncode: int
-    model_shape: tuple[int, ...]    # (nq, nv, nu, nbody, ngeom)
-
-@dataclass
-class RLState:
-    model_shape: tuple[int, ...]
-    last_compile_ok: bool
-    last_runtime_ok: bool
-    warning_multi_hot: list[int]
-    max_abs_qpos: float
-    max_abs_qvel: float
-    max_abs_ctrl: float
-    has_nan: bool
-    has_inf: bool
-    last_reward: float
-    last_novelty: float
-    mutation_history_ids: list[int]   # last K
+Reply ONLY with one line of valid JSON:
+{"mutator": "...", "param_seed_idx": int, "rollout_idx": int}
 ```
 
-## Appendix B：Mutator 基类参考
+The model output is parsed; `parse_fail` is tracked. Failure → random
+fallback. Action space is **identical** to RL (same `MUTATOR_IDS`, same
+`PARAM_SEED_TABLE`, same `n_rollout_buckets`) so the comparison is
+controlled.
 
-```python
-class BaseMutator:
-    id: str = "abstract"
+### 9.2 Three-phase finetune
 
-    def sample_params(self, testcase: TestCase, rng) -> dict: ...
-
-    def apply(self, testcase: TestCase, params: dict) -> "MutationApplyResult":
-        """
-        Returns MutationApplyResult(ok, new_xml_path|None, reason|None).
-        Must NOT raise on expected failures; only raise on programming bugs.
-        """
-        raise NotImplementedError
+```
+RL run (PPO budget≥1000)
+        │  logs/run_actor_critic_ppo.jsonl  (state_text + action + reward)
+        ▼
+tools/llm_collect_traces.py
+   --top-pct 0.3   ──►  data/sft.jsonl   (high-reward demonstrations)
+   --bot-pct 0.3   ──►  data/dpo.jsonl   (chosen/rejected pairs)
+        │
+        ▼
+tools/llm_sft.py     (LoRA + optional 4-bit QLoRA + grad-ckpt)
+   --model Qwen/Qwen2.5-1.5B  --quant 4bit  --grad-accum 4
+        │
+        ▼  checkpoints/sft_qwen15
+tools/llm_dpo.py     (DPOTrainer; reuses SFT ckpt as both init and ref)
+        │
+        ▼  checkpoints/dpo_qwen15
+src.main llm  --enable  --model checkpoints/dpo_qwen15
 ```
 
-## Appendix C：Oracle 基类参考
+### 9.3 What you need to prepare to start an LLM-finetune experiment
 
-```python
-class BaseOracle:
-    name: str = "abstract"
+**(a) Software** — install in this order on the training host:
 
-    def evaluate(self, raw_run_output: dict) -> "OracleVerdict":
-        """
-        raw_run_output: subprocess 返回的 JSON dict.
-        Returns OracleVerdict(triggered, severity, tags, details).
-        """
-        raise NotImplementedError
+```
+pip install -r requirements.txt        # MuJoCo engine
+pip install -r requirements-rl.txt     # GPU PyTorch (CUDA 12.x wheel for RTX cards)
+pip install -r requirements-llm.txt    # transformers + peft + trl + datasets + bitsandbytes
+```
+
+**(b) Data** — produce a JSONL trace before you can SFT:
+
+```
+python -m src.main rl --config configs/default.yaml --budget 2000 --algorithm ppo
+python -m tools.llm_collect_traces --in logs/run_actor_critic_ppo.jsonl \
+       --out-sft data/sft.jsonl --out-dpo data/dpo.jsonl --top-pct 0.3 --bot-pct 0.3
+```
+
+A 2 000-step PPO run yields ~600 SFT and ~600 DPO rows, which is
+**barely sufficient** for LoRA convergence on a 1.5 B model. For the
+paper, plan for **≥ 10 000 RL steps** before collecting.
+
+**(c) Hardware** — the 6 GB VRAM ceiling on a 3060 forces specific
+hyperparameters. The recipe below has been validated to fit:
+
+| Model | quant | batch | grad-accum | max_len | grad-ckpt | Approx VRAM |
+|---|---|---|---|---|---|---|
+| Qwen2.5-0.5B | none | 2 | 1 | 1024 | off | ~3.0 GB |
+| Qwen2.5-1.5B | 4-bit | 1 | 4  | 512  | on  | ~5.0 GB |
+| Llama-3.2-3B | 4-bit | 1 | 8  | 384  | on  | ~5.5 GB (tight) |
+| Qwen2.5-7B   | n/a   | — | —  | —    | —   | requires AutoDL 4090 (24 GB) |
+| Qwen2.5-14B  | n/a   | — | —  | —    | —   | requires AutoDL A100 |
+
+**(d) Tokenizer / chat template** — every model requires its tokenizer's
+own template. The current SFT script appends `tokenizer.eos_token` to the
+training text so generation halts cleanly; for instruct-tuned models
+you may want to switch to `tokenizer.apply_chat_template`.
+
+**(e) Storage** — ~6 GB per LoRA adapter checkpoint (full fp16 base + small LoRA);
+plan ~20 GB free disk per training run for two epochs of checkpointing.
+
+**(f) Hyperparameter starting points (LoRA)**:
+
+| Hyperparam | Value | Notes |
+|---|---|---|
+| `lora_r` | 8 | bump to 16 if loss plateaus |
+| `lora_alpha` | 16 | keep 2× `lora_r` |
+| `target_modules` | `["q_proj","v_proj"]` | Qwen / Llama; for other archs check the model card |
+| LR (SFT) | 2e-4 | classic LoRA setting |
+| LR (DPO) | 5e-5 | smaller — DPO is sharper |
+| `beta` (DPO) | 0.1 | start small to keep close to SFT init |
+| epochs (SFT) | 3 | overfits quickly past 5 |
+| epochs (DPO) | 2 | enough |
+
+**(g) AutoDL workflow** — for ≥ 7 B models, a complete recipe is
+documented in `EXECUTION.md` §4 and packaged as
+`tools/autodl/{sync_to_remote.ps1, bootstrap.sh, train_remote.sh}`:
+
+```
+$env:AUTODL_HOST = "connect.westa.seetacloud.com"
+$env:AUTODL_PORT = "12345"
+.\tools\autodl\sync_to_remote.ps1                   # rsync push code
+ssh -p 12345 root@$AUTODL_HOST                      # then on the remote:
+  bash tools/autodl/bootstrap.sh                   # one-time env setup
+  bash tools/autodl/train_remote.sh Qwen/Qwen2.5-7B ppo 5000
+.\tools\autodl\sync_to_remote.ps1 -Pull            # rsync pull checkpoints
 ```
 
 ---
 
-**END OF GUIDE**
+## 10. Experimental protocol for the paper
 
-按 §18 顺序开干，按 §20 形式先给出第一轮输出，等用户确认后再生成代码。
+The minimum table to reproduce in the paper:
+
+| Baseline | Setting | Budget |
+|---|---|---|
+| **B-rand**     | random mutator + uniform parameter | 10 000 |
+| **B-greedy**   | epsilon-greedy on signature novelty | 10 000 |
+| **B-LLM-zs**   | Qwen-1.5B zero-shot | 10 000 |
+| **B-LLM-sft**  | + LoRA SFT on B-PPO traces | 10 000 |
+| **B-LLM-dpo**  | + DPO | 10 000 |
+| **A-reinf**    | REINFORCE | 10 000 |
+| **A-vac**      | Vanilla 1-step AC (GzFuzz-style) | 10 000 |
+| **A-a2c**      | A2C | 10 000 |
+| **A-ppo**      | PPO + GAE (main) | 10 000 |
+
+Three random seeds per row. Primary metrics:
+
+* **Cumulative unique signatures** vs. budget (RQ1: efficiency)
+* **Time-to-first-bug per failure_kind** (RQ2: triage-aware coverage)
+* **Mutator-usage entropy** over time (RQ3: exploration profile)
+* **LLM `parse_fail` rate** over training (RQ4: how much SFT/DPO improves
+  format compliance)
+
+Ablations:
+
+* Reward components on/off (`new_warning`, `inconsistency`, novelty bonus)
+* Action masking on/off
+* Featurizer: drop warning multi-hot / drop history average
+* PPO clip ε ∈ {0.1, 0.2, 0.3}; GAE λ ∈ {0.9, 0.95, 0.99}
+
+---
+
+## 11. Limitations and threats to validity
+
+* **Single language target** — we fuzz only the public Python wrapper, not
+  the C/C++ entry points; bugs only reachable through e.g. `mjMODEL`
+  manual construction are out of scope.
+* **Action space is fixed** — the 10 mutators are an *expert-designed*
+  abstraction. New defect classes outside their span (e.g. mesh-decoder
+  bugs in STL parsing) are reachable only via the structural mutators'
+  side effects.
+* **Reward weights are hand-tuned** — automated weight tuning (e.g.
+  PBT or population search) is future work.
+* **Single-machine experiments** — the framework spawns one worker at a
+  time to avoid OOM on a 6 GB laptop GPU; throughput on a server-class
+  CPU+GPU should scale linearly with `ProcessPoolExecutor`.
+
+---
+
+## 12. Reproducibility
+
+| | |
+|---|---|
+| OS verified  | Windows 10 + PowerShell 5.1, Ubuntu 22.04 (AutoDL) |
+| Python       | 3.10 |
+| MuJoCo       | 3.2.3 |
+| PyTorch      | 2.1+ (CUDA 12.x wheel for GPU) |
+| Cmd ‒ smoke  | `python demo_smoke.py` (4/4 PASS) |
+| Cmd ‒ random | `python -m src.main random --config configs/default.yaml --budget 200` |
+| Cmd ‒ RL     | `python -m src.main rl --config configs/default.yaml --budget 1000 --algorithm ppo` |
+| Cmd ‒ bench  | `python -m src.main bench --config configs/default.yaml --budget 500 --policies random vanilla_ac a2c ppo` |
+| Cmd ‒ LLM    | see `EXECUTION.md` §3 |
+
+Full installation, hyperparameter, and remote-training instructions are in
+[`mujoco_rl_fuzz/EXECUTION.md`](mujoco_rl_fuzz/EXECUTION.md).
+
+---
+
+## Appendix A. File index
+
+```
+icse27/mujoco_rl_fuzz/
+├── EXECUTION.md                         # operations manual
+├── configs/default.yaml                 # all knobs
+├── demo_smoke.py                        # 4-stage MuJoCo signal-capture demo
+├── seeds/                               # 4 hand-written + curated MJCF
+├── src/
+│   ├── main.py                          # CLI: dryrun / random / rl / llm / bench
+│   ├── runner.py                        # main fuzz loop
+│   ├── triage.py                        # signature de-duplication
+│   ├── seed_pool.py
+│   ├── engine/
+│   │   ├── subprocess_worker.py         # crash-isolated executor
+│   │   ├── compile_and_run.py           # dispatcher
+│   │   └── state_ops.py                 # NaN/Inf JSON encoding
+│   ├── mutations/                       # 10 high-level mutators
+│   ├── oracles/                         # 4 oracles
+│   ├── rl/
+│   │   ├── features.py                  # SHARED featurizer (RL + LLM)
+│   │   ├── reward.py
+│   │   ├── networks.py                  # Actor-Critic with 3 heads
+│   │   ├── actor_critic_policy.py
+│   │   ├── llm_policy.py
+│   │   ├── random_policy.py
+│   │   └── algorithms/                  # reinforce, vanilla_ac, a2c, ppo
+│   └── experiments/
+│       ├── random_baseline.py
+│       ├── rl_guided_fuzz.py
+│       ├── llm_baseline.py
+│       └── benchmark.py                 # multi-policy side-by-side
+├── tools/
+│   ├── fetch_assets.py                  # curated upstream MJCF crawler
+│   ├── llm_collect_traces.py            # build SFT + DPO datasets from RL logs
+│   ├── llm_sft.py                       # LoRA SFT (+ optional 4-bit QLoRA)
+│   ├── llm_dpo.py                       # DPO continue from SFT ckpt
+│   └── autodl/
+│       ├── sync_to_remote.ps1
+│       ├── bootstrap.sh
+│       └── train_remote.sh
+└── tests/test_mutations.py
+```

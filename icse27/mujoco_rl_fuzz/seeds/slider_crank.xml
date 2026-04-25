@@ -1,0 +1,26 @@
+<!-- Slider+crank with equality constraint. Stresses solver / SOLVER_TOGGLE / equality solving. -->
+<mujoco model="slider_crank">
+  <option gravity="0 0 -9.81" timestep="0.002" integrator="implicit" solver="Newton" iterations="50"/>
+  <worldbody>
+    <light pos="0 0 3"/>
+    <geom name="floor" type="plane" size="2 2 0.1" rgba="0.8 0.9 0.8 1"/>
+    <body name="crank" pos="0 0 1">
+      <joint name="rot" type="hinge" axis="0 1 0" damping="0.01"/>
+      <geom name="gc" type="capsule" fromto="0 0 0 0.3 0 0" size="0.02" mass="0.3"/>
+      <body name="rod" pos="0.3 0 0">
+        <joint name="pin1" type="hinge" axis="0 1 0" damping="0.01"/>
+        <geom name="gr" type="capsule" fromto="0 0 0 0.5 0 0" size="0.02" mass="0.4"/>
+      </body>
+    </body>
+    <body name="slider" pos="0.8 0 1">
+      <joint name="slide" type="slide" axis="1 0 0" range="-1 1" damping="0.05"/>
+      <geom name="gs" type="box" size="0.08 0.05 0.05" mass="0.5"/>
+    </body>
+  </worldbody>
+  <equality>
+    <connect name="rod_slider" body1="rod" body2="slider" anchor="0.5 0 0"/>
+  </equality>
+  <actuator>
+    <motor name="drive" joint="rot" ctrlrange="-5 5"/>
+  </actuator>
+</mujoco>

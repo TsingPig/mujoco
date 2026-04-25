@@ -1,0 +1,4 @@
+# RL training extras (PPO / A2C). Install on top of requirements.txt.
+# For RTX 3060 Laptop (CUDA 12.x):
+#   pip install --index-url https://download.pytorch.org/whl/cu121 torch
+torch>=2.1

@@ -1,0 +1,11 @@
+# LLM finetune extras. For RTX 3060 Laptop (6GB) use --quant 4bit.
+transformers>=4.45
+peft>=0.13
+trl>=0.11
+datasets>=3.0
+accelerate>=1.0
+# QLoRA (4bit / 8bit):
+bitsandbytes>=0.43      ; platform_system != "Windows"
+# On Windows use the prebuilt wheel:
+#   pip install bitsandbytes-windows  OR  pip install bitsandbytes --prefer-binary
+sentencepiece>=0.2
