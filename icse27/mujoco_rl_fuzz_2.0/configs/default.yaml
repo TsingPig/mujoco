@@ -1,0 +1,50 @@
+seeds:
+  curated_dir: seeds/curated
+  quarantine_dir: seeds/_quarantine
+  pattern: "*.xml"
+  per_source_cap:
+    mujoco: 10
+    menagerie: 20
+    dm_control: 15
+    gym_robotics: 8
+    mujoco_mpc: 4
+    robosuite: 2
+    mjx: 1
+
+mutators:
+  # Order = canonical action index for downstream RL
+  - STRUCT_GROW_LINK
+  - STRUCT_SHRINK
+  - STRUCT_DUPLICATE_SUBTREE
+  - MUTATE_GEOM_SHAPE
+  - MUTATE_GEOM_SIZE
+  - MUTATE_INERTIAL
+  - MUTATE_JOINT_TYPE
+  - MUTATE_JOINT_LIMIT
+  - MUTATE_DAMPING_FRICTION
+  - MUTATE_FRICTION
+  - MUTATE_SOLREF_SOLIMP
+  - MUTATE_CONTACT_MARGIN
+  - ACTUATOR_ADD
+  - ACTUATOR_MUTATE_RANGE
+  - ACTUATOR_DELETE
+  - EQUALITY_ADD
+  - TENDON_ADD
+  - MUTATE_TIMESTEP
+  - MUTATE_INTEGRATOR
+  - MUTATE_SOLVER_ITER
+  - SET_QPOS_RUNTIME
+  - SET_QVEL_RUNTIME
+  - SET_CTRL_RUNTIME
+
+validity:
+  # Intensity modes that are deliberately invalid-but-parseable.
+  # CI gate skips these; runtime test ensures they don't crash mj_loadXML.
+  invalid_parseable_whitelist:
+    - nan_inf
+    - negative_principal
+    - singular_zero_range
+    - boundary_neg_eps
+    - over_constrain_pair
+  # Maximum compile time per validation in seconds (sanity bound).
+  compile_timeout_sec: 5

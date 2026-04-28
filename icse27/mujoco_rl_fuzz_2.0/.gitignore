@@ -1,0 +1,10 @@
+.cache/
+seeds/curated/
+seeds/_quarantine/
+seeds/_pool/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/

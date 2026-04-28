@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mujoco-rl-fuzz-2"
+version = "0.0.1a"
+description = "GzFuzz-style RL fuzzer for MuJoCo (v2.0 alpha)"
+requires-python = ">=3.9"
+dependencies = [
+    "mujoco>=3.2.0",
+    "lxml>=5.1",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-xdist>=3"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
