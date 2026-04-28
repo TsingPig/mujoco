@@ -25,6 +25,7 @@ class ExecutionResult:
     steps_done: int = 0
     state_stats: dict[str, float] = field(default_factory=dict)
     consistency_diff: Optional[float] = None
+    solver_diff: Optional[dict] = None  # v8: differential-solver oracle output
     model_shape: tuple[int, ...] = ()
 
 
@@ -41,5 +42,6 @@ def result_to_dict(r: ExecutionResult) -> dict[str, Any]:
         "steps_done": r.steps_done,
         "state_stats": r.state_stats,
         "consistency_diff": r.consistency_diff,
+        "solver_diff": r.solver_diff,
         "model_shape": list(r.model_shape),
     }

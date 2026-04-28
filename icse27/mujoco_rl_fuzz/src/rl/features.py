@@ -32,6 +32,10 @@ class RawState:
     last_reward: float = 0.0
     last_novelty: float = 0.0
     mutation_history_ids: list[int] = field(default_factory=list)
+    # Fix 4: identity of the *current* seed XML being mutated.
+    # Without this the policy can't tell which of N seeds it is acting on.
+    seed_idx: int = 0
+    n_seeds: int = 1
 
 
 def _safe_log1p(x: float) -> float:
@@ -42,7 +46,8 @@ def _safe_log1p(x: float) -> float:
 
 def featurize(s: RawState, history_k: int,
               warn_vocab: Optional[list[str]] = None,
-              n_mut: Optional[int] = None) -> np.ndarray:
+              n_mut: Optional[int] = None,
+              max_seeds: int = 32) -> np.ndarray:
     warn_vocab = warn_vocab or DEFAULT_WARN_VOCAB
     n_mut = n_mut or len(MUTATOR_IDS)
 
@@ -77,7 +82,12 @@ def featurize(s: RawState, history_k: int,
         denom = max(1, len(recent))
         hist_vec = [v / denom for v in hist_vec]
 
-    return np.asarray(numeric + warn_vec + hist_vec, dtype=np.float32)
+    # Fix 4: one-hot of current seed (truncated to max_seeds slots)
+    seed_vec = [0.0] * max_seeds
+    if 0 <= s.seed_idx < max_seeds:
+        seed_vec[s.seed_idx] = 1.0
+
+    return np.asarray(numeric + warn_vec + hist_vec + seed_vec, dtype=np.float32)
 
 
 def state_text(s: RawState, warn_vocab: Optional[list[str]] = None) -> str:
@@ -99,14 +109,15 @@ def state_text(s: RawState, warn_vocab: Optional[list[str]] = None) -> str:
 
 
 def state_dim(history_k: int, warn_vocab: Optional[list[str]] = None,
-              n_mut: Optional[int] = None) -> int:
+              n_mut: Optional[int] = None, max_seeds: int = 32) -> int:
     warn_vocab = warn_vocab or DEFAULT_WARN_VOCAB
     n_mut = n_mut or len(MUTATOR_IDS)
-    return 14 + len(warn_vocab) + n_mut
+    return 14 + len(warn_vocab) + n_mut + max_seeds
 
 
 def raw_state_from_result(result, history: list[int], last_reward: float,
-                          last_novelty: float) -> RawState:
+                          last_novelty: float,
+                          seed_idx: int = 0, n_seeds: int = 1) -> RawState:
     return RawState(
         model_shape=tuple(result.model_shape) if result.model_shape else (0, 0, 0, 0, 0),
         last_compile_ok=bool(result.compile_ok),
@@ -120,4 +131,6 @@ def raw_state_from_result(result, history: list[int], last_reward: float,
         last_reward=float(last_reward),
         last_novelty=float(last_novelty),
         mutation_history_ids=list(history),
+        seed_idx=int(seed_idx),
+        n_seeds=int(n_seeds),
     )

@@ -8,6 +8,10 @@ run:
   seed: 0                   # 全局 RNG 种子
   out_dir: outputs
   log_dir: logs
+  # v7: GZFuzz-style validity gate. After mutation, pre-compile in main
+  # process; on failure resample params up to N times before giving up.
+  # Set to 0 to disable (pre-v7 behaviour).
+  validity_retries: 3
 
 seeds:
   dir: seeds                # 相对项目根
@@ -83,9 +87,19 @@ reward:
   new_warning: 4.0
   inconsistency: 3.0
   known_warning: 2.0
-  novel_state_bucket: 1.0
-  trivial_compile_fail: -1.0
+  novel_state_bucket: 2.0
+  # v7: compile-time failures are fuzzer-internal noise (invalid MJCF tree
+  # that MuJoCo correctly rejected). They are NOT MuJoCo bugs and must NOT be
+  # rewarded. Uniform small negative steers RL away from this class of action.
+  invalid_input: -0.5
   duplicate_signature: -2.0
+  # v7: SpontaneousNanOracle marks a finite-input → NaN/Inf transition (or
+  # spontaneous BADQPOS/BADQVEL/BADQACC). Strong reward to pull RL toward
+  # this region.
+  real_bug_candidate: 20.0
+  # Fix 2: count-based curiosity bonus c / sqrt(visits) on (mutator, param_seed).
+  # Decays from +1.0 (1st visit) -> +0.32 (10th) -> +0.1 (100th).
+  curiosity_coef: 1.0
 
 # Actor-Critic 网络（见 guide §15）
 rl:
@@ -94,7 +108,7 @@ rl:
   history_k: 8               # mutation_history_ids 长度
   lr: 3.0e-4
   gamma: 0.99
-  entropy_coef: 0.01
+  entropy_coef: 0.05
   value_coef: 0.5
   rollout_per_update: 64
 

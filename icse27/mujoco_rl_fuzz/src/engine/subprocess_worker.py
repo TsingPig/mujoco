@@ -199,6 +199,95 @@ def run_one(spec: dict) -> dict:
         except Exception:
             out["consistency"] = {"ran": False, "diff": None}
 
+    # ---- v8: differential solver oracle ----
+    # Re-run same XML + same perturb under DIFFERENT solver/integrator combos
+    # and compare final qpos. Large divergence on a well-conditioned system is
+    # a strong real-bug signal (one of the solvers got it wrong).
+    # We only enable this path when the rollout was deterministic and finite
+    # (otherwise diff is meaningless).
+    out["solver_diff"] = None
+    if (consistency and out["compile"]["ok"] and out["runtime"]["ok"]
+            and data is not None
+            and not out["state_stats"].get("has_nan")
+            and not out["state_stats"].get("has_inf")):
+        try:
+            ref_qpos = np.array(data.qpos, copy=True)
+            results = {}
+            results_qpos: dict[str, np.ndarray] = {}
+            # (solver_id, integrator_id, label)
+            #   mjtSolver: 0=PGS, 1=CG, 2=Newton
+            #   mjtIntegrator: 0=Euler, 1=RK4, 2=implicit, 3=implicitfast
+            combos = [
+                (2, 0, "Newton+Euler"),
+                (1, 0, "CG+Euler"),
+                (0, 0, "PGS+Euler"),
+                (2, 2, "Newton+implicit"),
+                (2, 3, "Newton+implicitfast"),
+            ]
+            for sid, iid, label in combos:
+                m2 = mujoco.MjModel.from_xml_path(xml_path)
+                m2.opt.solver = sid
+                m2.opt.integrator = iid
+                # Use generous iterations + tight tolerance so each solver
+                # has the best chance to actually converge — disagreement
+                # then implicates one solver, not lack of effort.
+                m2.opt.iterations = 200
+                m2.opt.tolerance = 1e-10
+                if disable_clamp_ctrl:
+                    m2.opt.disableflags |= int(mujoco.mjtDisableBit.mjDSBL_CLAMPCTRL)
+                d2 = mujoco.MjData(m2)
+                _apply_perturb(np.asarray(d2.qpos), perturb.get("qpos") or [])
+                _apply_perturb(np.asarray(d2.qvel), perturb.get("qvel") or [])
+                _apply_perturb(np.asarray(d2.ctrl), perturb.get("ctrl") or [])
+                ok = True
+                for _ in range(n_steps):
+                    try:
+                        mujoco.mj_step(m2, d2)
+                    except Exception:
+                        ok = False
+                        break
+                qp = np.asarray(d2.qpos)
+                if ok and qp.size == ref_qpos.size and np.isfinite(qp).all():
+                    diff = float(np.nanmax(np.abs(qp - ref_qpos)))
+                    results_qpos[label] = np.array(qp, copy=True)
+                else:
+                    diff = float("nan")
+                results[label] = diff
+            # ---- v8 metric: same-integrator solver disagreement ----
+            # Compare the actual final qpos vectors (not their diffs vs ref)
+            # across Newton/CG/PGS+Euler. With iterations=200 and tol=1e-10
+            # the three convex solvers MUST converge to the same fixed point;
+            # any disagreement implicates one solver. Cross-integrator diffs
+            # (implicit/implicitfast) are legitimately different and kept
+            # for diagnostic context only, not flagged.
+            try:
+                triplet = ["Newton+Euler", "CG+Euler", "PGS+Euler"]
+                qps = {k: results_qpos.get(k) for k in triplet
+                       if results_qpos.get(k) is not None}
+                solver_only_max = 0.0
+                if len(qps) >= 2:
+                    keys = list(qps.keys())
+                    for i in range(len(keys)):
+                        for j in range(i + 1, len(keys)):
+                            a, b = qps[keys[i]], qps[keys[j]]
+                            if a.size == b.size and np.isfinite(a).all() and np.isfinite(b).all():
+                                d = float(np.nanmax(np.abs(a - b)))
+                                if d > solver_only_max:
+                                    solver_only_max = d
+            except Exception:
+                solver_only_max = 0.0
+            finite_diffs = [v for v in results.values() if np.isfinite(v)]
+            max_diff = max(finite_diffs) if finite_diffs else float("nan")
+            out["solver_diff"] = {
+                "per_combo_diff_vs_ref": results,
+                "max_diff": max_diff,
+                "solver_only_max_diff": solver_only_max,
+                "ref_solver": int(model.opt.solver),
+                "ref_integrator": int(model.opt.integrator),
+            }
+        except Exception as e:
+            out["solver_diff"] = {"error": f"{type(e).__name__}: {e}"[:200]}
+
     # ---- warnings ----
     out["warnings"] = _collect_warnings(data) if data is not None else _collect_warnings_no_data()
     return out

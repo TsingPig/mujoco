@@ -15,6 +15,10 @@ class RunCfg:
     seed: int = 0
     out_dir: str = "outputs"
     log_dir: str = "logs"
+    # v7: GZFuzz-style validity gate. After applying a mutation we pre-compile
+    # in the main process; on failure we re-sample params up to N times before
+    # giving up (counting the step as `invalid`).
+    validity_retries: int = 3
 
 
 @dataclass

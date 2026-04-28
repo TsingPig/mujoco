@@ -39,10 +39,18 @@ def compute_reward(result: ExecutionResult, is_new_signature: bool,
     if is_new_signature and sig_kind == "ok":
         comp["novel_state_bucket"] = w.get("novel_state_bucket", 1.0)
 
-    if not result.compile_ok and not result.warnings and result.returncode == 0:
-        comp["trivial_compile_fail"] = w.get("trivial_compile_fail", -1.0)
+    # v7 (real-bug focus): compile-time failures are FUZZER-INTERNAL noise —
+    # the mutator produced an invalid MJCF that MuJoCo correctly rejected.
+    # We DO NOT reward them, novel or not. RL should be steered away from
+    # this class of action entirely. `sig_kind == 'invalid'` covers
+    # MutationSkip and any compile-fail.
+    if sig_kind == "invalid":
+        comp["invalid_input"] = w.get("invalid_input", -0.5)
 
-    if not is_new_signature and sig_kind in ("warning_only", "compile", "runtime"):
+    # Penalise duplicate signatures for the kinds that *do* count as findings,
+    # to push RL toward unseen behaviour rather than re-hitting the same
+    # warning over and over.
+    if (sig_kind != "invalid") and (not is_new_signature) and sig_kind in ("warning_only", "runtime"):
         comp["duplicate_signature"] = w.get("duplicate_signature", -2.0)
 
     total = float(sum(comp.values()))

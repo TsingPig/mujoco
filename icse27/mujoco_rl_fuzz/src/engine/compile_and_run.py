@@ -108,6 +108,7 @@ def run_in_subprocess(
             res.traceback_summary = raw.get("runtime", {}).get("traceback")
         cons = raw.get("consistency") or {}
         res.consistency_diff = cons.get("diff") if cons.get("ran") else None
+        res.solver_diff = raw.get("solver_diff")
         res.model_shape = tuple(raw.get("model_shape") or ())
 
     # Cleanup spec/result files (keep on failure for forensics)

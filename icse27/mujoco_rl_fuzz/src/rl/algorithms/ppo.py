@@ -15,14 +15,14 @@ if _HAS_TORCH:
 
 
 class PPOAlgorithm:
-    def __init__(self, d_in: int, n_mut: int, n_param_buckets: int = 16,
-                 n_rollout_buckets: int = 5, d_hidden: int = 128,
+    def __init__(self, d_in: int, n_mut: int, n_seed: int = 16,
+                 n_param_buckets: int = 16, n_rollout_buckets: int = 5, d_hidden: int = 128,
                  lr: float = 3e-4, gamma: float = 0.99, lam: float = 0.95,
                  clip_eps: float = 0.2, epochs: int = 4, minibatch: int = 32,
                  entropy_coef: float = 0.01, value_coef: float = 0.5,
                  max_grad_norm: float = 0.5, device: str = "cpu"):
         require_torch()
-        self.net = ActorCritic(d_in, n_mut, n_param_buckets,
+        self.net = ActorCritic(d_in, n_mut, n_seed, n_param_buckets,
                                n_rollout_buckets, d_hidden).to(device)
         self.opt = optim.Adam(self.net.parameters(), lr=lr)
         self.gamma = gamma
@@ -55,6 +55,7 @@ class PPOAlgorithm:
                          dtype=torch.float32, device=self.device)
         masks = torch.tensor(np.array([b["mask"] for b in batch]),
                              dtype=torch.bool, device=self.device)
+        see = torch.tensor([b["seed_idx"] for b in batch], dtype=torch.long, device=self.device)
         mut = torch.tensor([b["mut_idx"] for b in batch], dtype=torch.long, device=self.device)
         par = torch.tensor([b["param_idx"] for b in batch], dtype=torch.long, device=self.device)
         rol = torch.tensor([b["roll_idx"] for b in batch], dtype=torch.long, device=self.device)
@@ -80,7 +81,7 @@ class PPOAlgorithm:
                     continue
                 mb_t = torch.tensor(mb, dtype=torch.long, device=self.device)
                 log_prob, entropy, value = self.net.evaluate(
-                    x[mb_t], masks[mb_t], mut[mb_t], par[mb_t], rol[mb_t])
+                    x[mb_t], masks[mb_t], see[mb_t], mut[mb_t], par[mb_t], rol[mb_t])
                 ratio = torch.exp(log_prob - old_log[mb_t])
                 surr1 = ratio * adv[mb_t]
                 surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * adv[mb_t]

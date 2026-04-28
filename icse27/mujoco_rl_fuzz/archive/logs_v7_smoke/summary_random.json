@@ -1,0 +1,62 @@
+{
+  "n_raw": 60,
+  "n_unique": 3,
+  "n_unique_real": 2,
+  "n_unique_invalid": 1,
+  "by_kind_unique": {
+    "ok": 1,
+    "invalid": 1,
+    "warning_only": 1
+  },
+  "top_signatures": [
+    {
+      "sig": "350939a8ea5e83af",
+      "count": 53,
+      "kind": "ok",
+      "etype": null,
+      "warnings": [],
+      "msg": ""
+    },
+    {
+      "sig": "6a839ba1ec0eb882",
+      "count": 5,
+      "kind": "invalid",
+      "etype": "MutationSkip",
+      "warnings": [],
+      "msg": "precompile:ValueError [retries=N]"
+    },
+    {
+      "sig": "b2812039bb22d9a2",
+      "count": 2,
+      "kind": "warning_only",
+      "etype": null,
+      "warnings": [
+        "BADQVEL"
+      ],
+      "msg": ""
+    }
+  ],
+  "top_signatures_real": [
+    {
+      "sig": "350939a8ea5e83af",
+      "count": 53,
+      "kind": "ok",
+      "etype": null,
+      "warnings": [],
+      "msg": ""
+    },
+    {
+      "sig": "b2812039bb22d9a2",
+      "count": 2,
+      "kind": "warning_only",
+      "etype": null,
+      "warnings": [
+        "BADQVEL"
+      ],
+      "msg": ""
+    }
+  ],
+  "elapsed_sec": 45.27675938606262,
+  "budget": 60,
+  "policy": "random"
+}

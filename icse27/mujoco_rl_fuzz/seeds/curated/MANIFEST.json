@@ -1,0 +1,2131 @@
+{
+  "generated_at": 1777113999.004265,
+  "items": [
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/soccer/assets/boxhead/boxhead.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/humanoid_CMU_V2019.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/humanoid_CMU_V2020.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/rodent.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/build_fruitfly/floor.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/build_fruitfly/fruitfly.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/build_fruitfly/assets/drosophila.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/build_fruitfly/assets/drosophila_defaults.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/build_fruitfly/assets/drosophila_fused.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/dog_v2/dog.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/dog_v2/dog_base.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/dog_v2/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/fruitfly_v2/floor.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/fruitfly_v2/fruitfly.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/locomotion/walkers/assets/jumping_ball/jumping_ball_with_head.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/acrobot.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/ball_in_cup.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/cartpole.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/cheetah.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/dog.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/finger.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/fish.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/hopper.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/humanoid.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/humanoid_CMU.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/lqr.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/manipulator.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/pendulum.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/point_mass.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/quadruped.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/reacher.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/stacker.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/swimmer.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/walker.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/common/materials.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/common/skybox.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "dm_control",
+      "rel": "dm_control/suite/common/visual.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "agilex_piper/piper.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "agilex_piper/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "agility_cassie/cassie.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "agility_cassie/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "aloha/aloha.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "aloha/filtered_cartesian_actuators.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "aloha/joint_position_actuators.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "aloha/keyframe_ctrl.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "aloha/keyframe_no_act.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "aloha/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "anybotics_anymal_b/anymal_b.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "anybotics_anymal_b/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "anybotics_anymal_c/anymal_c.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "anybotics_anymal_c/anymal_c_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "anybotics_anymal_c/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "anybotics_anymal_c/scene_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "apptronik_apollo/apptronik_apollo.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "apptronik_apollo/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "arx_l5/arx_l5.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "arx_l5/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "berkeley_humanoid/berkeley_humanoid.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "berkeley_humanoid/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "bitcraze_crazyflie_2/cf2.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "bitcraze_crazyflie_2/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "booster_t1/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "booster_t1/t1.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "boston_dynamics_spot/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "boston_dynamics_spot/scene_arm.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "boston_dynamics_spot/spot.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "boston_dynamics_spot/spot_arm.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "dynamixel_2r/dynamixel_2r.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "dynamixel_2r/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flexiv_rizon4/flexiv_rizon4.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flexiv_rizon4/scene.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flexiv_rizon4/assets/link0/link0.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flexiv_rizon4/assets/link1/link1.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flexiv_rizon4/assets/link2/link2.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flexiv_rizon4/assets/link3/link3.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flexiv_rizon4/assets/link4/link4.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flexiv_rizon4/assets/link5/link5.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flexiv_rizon4/assets/link6/link6.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flexiv_rizon4/assets/link7/link7.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flybody/fruitfly.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "flybody/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "fourier_n1/n1.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "fourier_n1/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_emika_panda/hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_emika_panda/mjx_hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_emika_panda/mjx_panda.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_emika_panda/mjx_panda_nohand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_emika_panda/mjx_scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_emika_panda/mjx_single_cube.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_emika_panda/panda.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_emika_panda/panda_nohand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_emika_panda/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_fr3/fr3.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_fr3/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_fr3_v2/fr3v2.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "franka_fr3_v2/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_barkour_v0/barkour_v0.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_barkour_v0/barkour_v0_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_barkour_v0/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_barkour_v0/scene_barkour.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_barkour_v0/scene_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_barkour_vb/barkour_vb.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_barkour_vb/barkour_vb_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_barkour_vb/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_barkour_vb/scene_hfield_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_barkour_vb/scene_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_robot/robot.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "google_robot/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "hello_robot_stretch/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "hello_robot_stretch/stretch.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "hello_robot_stretch_3/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "hello_robot_stretch_3/stretch.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "i2rt_yam/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "i2rt_yam/yam.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "iit_softfoot/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "iit_softfoot/softfoot.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "kinova_gen3/gen3.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "kinova_gen3/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "kuka_iiwa_14/iiwa14.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "kuka_iiwa_14/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "leap_hand/left_hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "leap_hand/right_hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "leap_hand/scene_left.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "leap_hand/scene_right.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "low_cost_robot_arm/low_cost_robot_arm.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "low_cost_robot_arm/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/MS-Human-700-Locomotion.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/MS-Human-700-Manipulation.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/MS-Human-700.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/scene_locomotion.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/scene_manipulation.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/asset/Asset_Lowerbody.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/asset/Asset_Others.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/asset/Asset_Torso.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/asset/Asset_Upperbody.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_locomotion/Body_Arm_l.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_locomotion/Body_Arm_r.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_locomotion/Body_Leg_Foot_l.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_locomotion/Body_Leg_Foot_r.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_locomotion/Body_Torso_Simple.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_manipulation/Body_Arm_Hand_r.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_manipulation/Body_Arm_Hand_Vis_l.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_manipulation/Body_Leg_Foot_Vis_l.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_manipulation/Body_Leg_Foot_Vis_r.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_manipulation/Body_Torso_Unimanual.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_manipulation/Body_Waterbottle.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_primary/Body_Arm_l.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_primary/Body_Arm_r.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_primary/Body_Leg_Foot_l.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_primary/Body_Leg_Foot_r.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/body_primary/Body_Torso_Simple.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/contact/Contact_Lowerbody.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/contact/Contact_Upperbody.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/equality/Equality_Lowerbody.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/equality/Equality_Upperbody.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/equality/Equality_Upperbody_r.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/muscle/Muscle_Arm_Hand_r.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/muscle/Muscle_Arm_l.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/muscle/Muscle_Arm_r.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/muscle/Muscle_Leg_l.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/muscle/Muscle_Leg_r.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/muscle/Muscle_Torso.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/tendon/Tendon_Arm_Hand_l.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/tendon/Tendon_Arm_Hand_r.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/tendon/Tendon_Arm_l.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/tendon/Tendon_Arm_r.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/tendon/Tendon_Leg_l.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/tendon/Tendon_Leg_r.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ms_human_700/assets/tendon/Tendon_Torso.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_talos/scene_motor.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_talos/scene_position.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_talos/talos.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_talos/talos_motor.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_talos/talos_position.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago/scene_motor.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago/scene_position.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago/scene_velocity.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago/tiago.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago/tiago_motor.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago/tiago_position.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago/tiago_velocity.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago_dual/scene_motor.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago_dual/scene_position.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago_dual/scene_velocity.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago_dual/tiago_dual.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago_dual/tiago_dual_motor.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago_dual/tiago_dual_position.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pal_tiago_dual/tiago_dual_velocity.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pndbotics_adam_lite/adam_lite.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "pndbotics_adam_lite/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "realsense_d435i/d435i.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "rethink_robotics_sawyer/sawyer.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "rethink_robotics_sawyer/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robotiq_2f85/2f85.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robotiq_2f85/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robotiq_2f85_v4/2f85.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robotiq_2f85_v4/mjx_2f85.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robotiq_2f85_v4/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robotis_op3/op3.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robotis_op3/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robotstudio_so101/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robotstudio_so101/scene_box.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robotstudio_so101/so101.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robot_soccer_kit/robot_soccer_kit.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "robot_soccer_kit/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "shadow_dexee/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "shadow_dexee/shadow_dexee.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "shadow_hand/keyframes.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "shadow_hand/left_hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "shadow_hand/right_hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "shadow_hand/scene_left.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "shadow_hand/scene_right.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "skydio_x2/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "skydio_x2/x2.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "stanford_tidybot/base.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "stanford_tidybot/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "stanford_tidybot/scene_base.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "stanford_tidybot/tidybot.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "tetheria_aero_hand_open/left_hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "tetheria_aero_hand_open/right_hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "tetheria_aero_hand_open/scene_right.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xc/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xc/scene_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xc/scene_pos.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xc/toddlerbot_2xc.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xc/toddlerbot_2xc_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xc/toddlerbot_2xc_pos.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xm/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xm/scene_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xm/scene_pos.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xm/toddlerbot_2xm.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xm/toddlerbot_2xm_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "toddlerbot_2xm/toddlerbot_2xm_pos.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "trossen_vx300s/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "trossen_vx300s/vx300s.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "trossen_wx250s/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "trossen_wx250s/wx250s.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "trossen_wxai/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "trossen_wxai/trossen_ai_bimanual.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "trs_so_arm100/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "trs_so_arm100/so_arm100.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ufactory_lite6/lite6.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ufactory_lite6/lite6_gripper_narrow.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ufactory_lite6/lite6_gripper_wide.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ufactory_lite6/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ufactory_xarm7/hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ufactory_xarm7/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ufactory_xarm7/xarm7.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "ufactory_xarm7/xarm7_nohand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "umi_gripper/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "umi_gripper/umi_gripper.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_a1/a1.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_a1/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_g1/g1.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_g1/g1_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_g1/g1_with_hands.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_g1/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_g1/scene_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_g1/scene_with_hands.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_go1/go1.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_go1/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_go2/go2.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_go2/go2_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_go2/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_go2/scene_mjx.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_h1/h1.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_h1/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_z1/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_z1/z1.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "unitree_z1/z1_gripper.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "universal_robots_ur10e/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "universal_robots_ur10e/ur10e.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "universal_robots_ur5e/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "universal_robots_ur5e/ur5e.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "wonik_allegro/left_hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "wonik_allegro/right_hand.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "wonik_allegro/scene_left.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "menagerie",
+      "rel": "wonik_allegro/scene_right.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "adhesion/active_adhesion.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "balloons/balloons.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "car/car.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "cards/cards.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "cube/cube_3x3x3.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/basket.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/bunny.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/bunny_multicell.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/bunny_quadratic.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/bunny_with_uv.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/cloth_sdf.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/flag.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/floppy.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/gripper.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/gripper_2d.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/gripper_trilinear.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/jelly.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/mannequin.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/pancake.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/pinch.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/plate.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/poncho.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/poncho_edgeequality.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/press.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/pulley.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/quadratic.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/scene.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/softbox.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/sphere_full.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/sphere_passive.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/sphere_radial.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/sphere_trilinear.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/strain.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/trampoline.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "flex/trilinear.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "hammock/hammock.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "humanoid/100_humanoids.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "humanoid/22_humanoids.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "humanoid/humanoid.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "humanoid/humanoid100.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "mug/mug.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/actuator/pid.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/elasticity/belt.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/elasticity/cable.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/elasticity/coil.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/elasticity/scene.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/sdf/bowl.xml",
+      "ok": false,
+      "reason": "timeout"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/sdf/cow.xml",
+      "ok": false,
+      "reason": "timeout"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/sdf/gear.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/sdf/mesh.xml",
+      "ok": false,
+      "reason": "timeout"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/sdf/mug.xml",
+      "ok": false,
+      "reason": "timeout"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/sdf/nutbolt.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/sdf/primitives.xml",
+      "ok": false,
+      "reason": "timeout"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/sdf/scene.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/sdf/torus.xml",
+      "ok": false,
+      "reason": "timeout"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "plugin/sensor/touch_grid.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/bowl.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/bunnies.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/container.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/cylinder.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/helix.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/leaves.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/newton_cradle.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/particle.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/particle_free.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/particle_free2d.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/scene.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/stonehenge.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "replicate/tendon.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "sleep/100_humanoids.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "sleep/dominos.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "sleep/humanoid.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "slider_crank/slider_crank.xml",
+      "ok": true,
+      "reason": "ok"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "tactile/tactile.xml",
+      "ok": false,
+      "reason": "ValueError"
+    },
+    {
+      "source": "upstream_models",
+      "rel": "tendon_arm/arm26.xml",
+      "ok": true,
+      "reason": "ok"
+    }
+  ],
+  "n_ok": 90,
+  "n_bad": 264
+}

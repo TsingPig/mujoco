@@ -1,0 +1,176 @@
+{
+  "n_raw": 200,
+  "n_unique": 24,
+  "by_kind_unique": {
+    "ok": 1,
+    "compile": 22,
+    "warning_only": 1
+  },
+  "top_signatures": [
+    {
+      "sig": "350939a8ea5e83af",
+      "count": 145,
+      "kind": "ok",
+      "etype": null,
+      "warnings": [],
+      "msg": ""
+    },
+    {
+      "sig": "30dd0e5d0a7e3390",
+      "count": 7,
+      "kind": "compile",
+      "etype": "MutationSkip",
+      "warnings": [],
+      "msg": "plane_skipped"
+    },
+    {
+      "sig": "370410267ad72510",
+      "count": 7,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: free joint can only be used on top level Element name 'b2', i"
+    },
+    {
+      "sig": "b69dc23c37b6373c",
+      "count": 7,
+      "kind": "compile",
+      "etype": "MutationSkip",
+      "warnings": [],
+      "msg": "invalid_rewire"
+    },
+    {
+      "sig": "b2812039bb22d9a2",
+      "count": 5,
+      "kind": "warning_only",
+      "etype": null,
+      "warnings": [
+        "BADQVEL"
+      ],
+      "msg": ""
+    },
+    {
+      "sig": "3d17aefea4d26702",
+      "count": 4,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: free joint can only be used on top level Element name 'ball',"
+    },
+    {
+      "sig": "9392c1038b934a6d",
+      "count": 3,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: free joint can only be used on top level Element name 'b1', i"
+    },
+    {
+      "sig": "0431fb9347b7e25d",
+      "count": 3,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g2', id N, line"
+    },
+    {
+      "sig": "87d612fb4bbc42fa",
+      "count": 3,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'gs', id N, line"
+    },
+    {
+      "sig": "1976c6cbdcfef77d",
+      "count": 2,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: free joint can only be used on top level Element name 'b3', i"
+    },
+    {
+      "sig": "de8afc288b421658",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_6365',"
+    },
+    {
+      "sig": "50d5c8fb043077fe",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_70835',"
+    },
+    {
+      "sig": "fb026962c64400df",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_47919',"
+    },
+    {
+      "sig": "de731cb9021a02a8",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_62457',"
+    },
+    {
+      "sig": "f61f5e697af3558c",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_26830',"
+    },
+    {
+      "sig": "876a866f9339f428",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_330', i"
+    },
+    {
+      "sig": "7b1f53d569178b82",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_58013',"
+    },
+    {
+      "sig": "48b5eb665f6642f8",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_91208',"
+    },
+    {
+      "sig": "f84f462d07260ba9",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g1', id N, line"
+    },
+    {
+      "sig": "bc07e18c8de70f4d",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_27102',"
+    }
+  ],
+  "elapsed_sec": 169.68096113204956,
+  "budget": 200,
+  "policy": "random"
+}

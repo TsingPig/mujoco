@@ -96,11 +96,32 @@ class StructGrowMutator(BaseMutator):
         if jtype == "free" and parent.tag != "worldbody":
             jtype = "hinge"
         etree.SubElement(body, "joint", name=f"j_{new_name}", type=jtype)
-        size_map = {"small": "0.02", "medium": "0.1", "large": "0.5"}
+        # v7: per-shape valid size dim. capsule needs (radius, half_length);
+        # box needs (rx, ry, rz); sphere needs (r,). Using a single value for
+        # capsule/box was the #1 source of compile-time "size has wrong
+        # dimensions" failures in the previous report.
+        shape = params["shape"]
+        scale_map = {"small": 0.02, "medium": 0.1, "large": 0.4}
+        s = scale_map[params["size_bucket"]]
+        if shape == "sphere":
+            size_str = f"{s}"
+        elif shape == "capsule":
+            size_str = f"{s} {s * 1.5}"
+        else:  # box
+            size_str = f"{s} {s} {s}"
         etree.SubElement(body, "geom",
                          name=f"g_{new_name}",
-                         type=params["shape"],
-                         size=size_map[params["size_bucket"]])
+                         type=shape,
+                         size=size_str,
+                         density="1000")  # ensures mass > mjMINVAL even at small sizes
+        # v7: explicit <inertial> guarantees mass + inertia regardless of
+        # density/geom math, eliminating "mass and inertia ... > mjMINVAL"
+        # compile errors.
+        m = max(1e-3, (s ** 3) * 1000.0)
+        d = max(1e-6, (s ** 2) * m / 6.0)
+        etree.SubElement(body, "inertial", pos="0 0 0",
+                         mass=str(m),
+                         diaginertia=f"{d} {d} {d}")
         _serialize(tree, out_xml_path)
         return MutationApplyResult(True, new_xml_path=out_xml_path)
 
@@ -194,10 +215,19 @@ class GeomPerturbMutator(BaseMutator):
         # Don't touch plane geoms (changing their type is rarely meaningful)
         if g.get("type") == "plane":
             return MutationApplyResult(False, reason="plane_skipped")
-        size_map = {"small": "0.005", "medium": "0.05", "large": "0.5"}
-        g.set("type", params["shape"])
-        g.set("size", size_map[params["size_bucket"]])
-        # Drop incompatible attrs
+        # v7: per-shape valid size dim (see STRUCT_GROW comment).
+        shape = params["shape"]
+        scale_map = {"small": 0.01, "medium": 0.05, "large": 0.3}
+        s = scale_map[params["size_bucket"]]
+        if shape == "sphere":
+            size_str = f"{s}"
+        elif shape == "capsule":
+            size_str = f"{s} {s * 1.5}"
+        else:  # box
+            size_str = f"{s} {s} {s}"
+        g.set("type", shape)
+        g.set("size", size_str)
+        # Drop attrs that are incompatible with the new shape.
         for a in ("fromto",):
             if a in g.attrib:
                 del g.attrib[a]
@@ -230,6 +260,11 @@ class JointPerturbMutator(BaseMutator):
         if not js:
             return MutationApplyResult(False, reason="no_joint")
         j = js[params["target_idx"] % len(js)]
+        # v7: don't try to convert ball/free joints — their range/limited
+        # semantics differ; this would compile-fail.
+        cur_type = j.get("type", "hinge")
+        if cur_type in ("ball", "free"):
+            return MutationApplyResult(False, reason=f"skip_{cur_type}_joint")
         rng_map = {"narrow": "-0.1 0.1", "medium": "-1.5 1.5", "wide": "-3.14 3.14"}
         damp_map = {"low": "0.001", "medium": "0.1", "high": "10.0"}
         j.set("type", params["jtype"])
@@ -348,12 +383,25 @@ class ActuatorEditMutator(BaseMutator):
             if not js:
                 return MutationApplyResult(False, reason="no_joint")
             j = js[params["joint_idx"] % len(js)]
+            jtype = j.get("type", "hinge")
+            # v7: motor on free/ball joints is invalid; skip cleanly.
+            if jtype in ("free", "ball"):
+                return MutationApplyResult(False, reason=f"motor_on_{jtype}")
             jname = j.get("name")
             if not jname:
                 jname = f"j_auto_{params['joint_idx']}"
                 j.set("name", jname)
+            # Unique name: include joint name + a per-call suffix derived from
+            # current actuator count to avoid collisions with prior adds.
+            existing_names = {a.get("name", "") for a in actuator_root}
+            base = f"act_{jname}"
+            cand = base
+            k = 0
+            while cand in existing_names:
+                k += 1
+                cand = f"{base}_{k}"
             etree.SubElement(actuator_root, "motor",
-                             name=f"act_{abs(hash(jname)) % 100000}",
+                             name=cand,
                              joint=jname,
                              ctrlrange=cr_map[params["ctrlrange_bucket"]])
         elif op == "del":

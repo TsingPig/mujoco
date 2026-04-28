@@ -1,0 +1,176 @@
+{
+  "n_raw": 100,
+  "n_unique": 30,
+  "by_kind_unique": {
+    "ok": 1,
+    "compile": 27,
+    "warning_only": 2
+  },
+  "top_signatures": [
+    {
+      "sig": "350939a8ea5e83af",
+      "count": 50,
+      "kind": "ok",
+      "etype": null,
+      "warnings": [],
+      "msg": ""
+    },
+    {
+      "sig": "b2812039bb22d9a2",
+      "count": 6,
+      "kind": "warning_only",
+      "etype": null,
+      "warnings": [
+        "BADQVEL"
+      ],
+      "msg": ""
+    },
+    {
+      "sig": "76a7af59df887b58",
+      "count": 5,
+      "kind": "compile",
+      "etype": "MutationSkip",
+      "warnings": [],
+      "msg": "not_enough_bodies"
+    },
+    {
+      "sig": "0431fb9347b7e25d",
+      "count": 3,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g2', id N, line"
+    },
+    {
+      "sig": "962b6607b4b0dd2f",
+      "count": 3,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: unknown transmission target 'hinge3' for actuator id = N Elem"
+    },
+    {
+      "sig": "2a8e5613d8077a26",
+      "count": 3,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: unknown transmission target 'hinge' for actuator id = N Eleme"
+    },
+    {
+      "sig": "b69dc23c37b6373c",
+      "count": 3,
+      "kind": "compile",
+      "etype": "MutationSkip",
+      "warnings": [],
+      "msg": "invalid_rewire"
+    },
+    {
+      "sig": "f9070f0c3a9e56cf",
+      "count": 2,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: unknown transmission target 'hinge2' for actuator id = N Elem"
+    },
+    {
+      "sig": "bda84c209b819cbb",
+      "count": 2,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g3', id N, line"
+    },
+    {
+      "sig": "30dd0e5d0a7e3390",
+      "count": 2,
+      "kind": "compile",
+      "etype": "MutationSkip",
+      "warnings": [],
+      "msg": "plane_skipped"
+    },
+    {
+      "sig": "1976c6cbdcfef77d",
+      "count": 2,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: free joint can only be used on top level Element name 'b3', i"
+    },
+    {
+      "sig": "f84f462d07260ba9",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g1', id N, line"
+    },
+    {
+      "sig": "d815de1982930389",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_2919',"
+    },
+    {
+      "sig": "95ebf1397a89a35e",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_10563',"
+    },
+    {
+      "sig": "7ddbf5b550051e9f",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_73889',"
+    },
+    {
+      "sig": "027ae3aaea84d373",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_39592',"
+    },
+    {
+      "sig": "b291582825fb65e4",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_95652',"
+    },
+    {
+      "sig": "0f689a4962dd72aa",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: unknown transmission target 'hinge1' for actuator id = N Elem"
+    },
+    {
+      "sig": "a3926a8103c82614",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g_grown_6992',"
+    },
+    {
+      "sig": "b3f75add67b0a11f",
+      "count": 1,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: unknown element 'rod' in equality constraint Element name 'ro"
+    }
+  ],
+  "elapsed_sec": 96.74211311340332,
+  "budget": 100,
+  "policy": "actor_critic_ppo"
+}

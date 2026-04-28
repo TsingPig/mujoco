@@ -1,0 +1,180 @@
+{
+  "n_raw": 1000,
+  "n_unique": 134,
+  "by_kind_unique": {
+    "ok": 1,
+    "compile": 129,
+    "warning_only": 4
+  },
+  "top_signatures": [
+    {
+      "sig": "350939a8ea5e83af",
+      "count": 537,
+      "kind": "ok",
+      "etype": null,
+      "warnings": [],
+      "msg": ""
+    },
+    {
+      "sig": "76a7af59df887b58",
+      "count": 47,
+      "kind": "compile",
+      "etype": "MutationSkip",
+      "warnings": [],
+      "msg": "not_enough_bodies"
+    },
+    {
+      "sig": "b2812039bb22d9a2",
+      "count": 42,
+      "kind": "warning_only",
+      "etype": null,
+      "warnings": [
+        "BADQVEL"
+      ],
+      "msg": ""
+    },
+    {
+      "sig": "2a8e5613d8077a26",
+      "count": 41,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: unknown transmission target 'hinge' for actuator id = N Eleme"
+    },
+    {
+      "sig": "b69dc23c37b6373c",
+      "count": 38,
+      "kind": "compile",
+      "etype": "MutationSkip",
+      "warnings": [],
+      "msg": "invalid_rewire"
+    },
+    {
+      "sig": "30dd0e5d0a7e3390",
+      "count": 27,
+      "kind": "compile",
+      "etype": "MutationSkip",
+      "warnings": [],
+      "msg": "plane_skipped"
+    },
+    {
+      "sig": "f9070f0c3a9e56cf",
+      "count": 21,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: unknown transmission target 'hinge2' for actuator id = N Elem"
+    },
+    {
+      "sig": "962b6607b4b0dd2f",
+      "count": 15,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: unknown transmission target 'hinge3' for actuator id = N Elem"
+    },
+    {
+      "sig": "1976c6cbdcfef77d",
+      "count": 15,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: free joint can only be used on top level Element name 'b3', i"
+    },
+    {
+      "sig": "0431fb9347b7e25d",
+      "count": 14,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g2', id N, line"
+    },
+    {
+      "sig": "caf06cec178f003e",
+      "count": 14,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'pole_geom', id"
+    },
+    {
+      "sig": "bda84c209b819cbb",
+      "count": 11,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g3', id N, line"
+    },
+    {
+      "sig": "f84f462d07260ba9",
+      "count": 9,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: size N must be positive in geom Element name 'g1', id N, line"
+    },
+    {
+      "sig": "3d17aefea4d26702",
+      "count": 9,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: free joint can only be used on top level Element name 'ball',"
+    },
+    {
+      "sig": "59d8892d99f9bbaa",
+      "count": 8,
+      "kind": "warning_only",
+      "etype": null,
+      "warnings": [
+        "BADQACC"
+      ],
+      "msg": ""
+    },
+    {
+      "sig": "0f689a4962dd72aa",
+      "count": 6,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: unknown transmission target 'hinge1' for actuator id = N Elem"
+    },
+    {
+      "sig": "370410267ad72510",
+      "count": 6,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: free joint can only be used on top level Element name 'b2', i"
+    },
+    {
+      "sig": "bd9d4a393bf5dd06",
+      "count": 5,
+      "kind": "warning_only",
+      "etype": null,
+      "warnings": [
+        "BADQPOS"
+      ],
+      "msg": ""
+    },
+    {
+      "sig": "b3f75add67b0a11f",
+      "count": 5,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: unknown element 'rod' in equality constraint Element name 'ro"
+    },
+    {
+      "sig": "9392c1038b934a6d",
+      "count": 5,
+      "kind": "compile",
+      "etype": "ValueError",
+      "warnings": [],
+      "msg": "ValueError: Error: free joint can only be used on top level Element name 'b1', i"
+    }
+  ],
+  "elapsed_sec": 742.1062004566193,
+  "budget": 1000,
+  "policy": "actor_critic_a2c"
+}

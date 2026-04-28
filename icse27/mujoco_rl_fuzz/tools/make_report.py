@@ -99,10 +99,29 @@ def cumulative_unique_series(rows):
 
 
 def by_kind_unique_dict(summary):
+    """v7: split into real-finding kinds and `invalid` (fuzzer-internal)."""
     if summary is None:
-        return {"ok": 0, "compile": 0, "warning_only": 0}
+        return {"ok": 0, "warning_only": 0, "runtime": 0, "crash": 0,
+                "inconsistency": 0, "invalid": 0, "compile": 0}
     d = summary.get("by_kind_unique") or {}
-    return {k: int(d.get(k, 0)) for k in ("ok", "compile", "warning_only")}
+    out = {k: int(d.get(k, 0)) for k in ("ok", "warning_only", "runtime",
+                                          "crash", "inconsistency",
+                                          "invalid", "compile")}
+    return out
+
+
+def real_bug_count(rows):
+    """Count testcases tagged `real_bug_candidate` by SpontaneousNanOracle."""
+    n = 0
+    sigs: set = set()
+    for r in rows:
+        for v in r.get("verdicts") or []:
+            if "real_bug_candidate" in (v.get("tags") or []):
+                n += 1
+                if r.get("signature"):
+                    sigs.add(r["signature"])
+                break
+    return n, len(sigs)
 
 
 def mutator_usage(rows):
@@ -159,17 +178,26 @@ def plot_cumulative_unique(per_policy, out_png):
 def plot_by_kind_stacked(per_policy, out_png):
     names = list(per_policy.keys())
     ok = [per_policy[n]["by_kind"]["ok"] for n in names]
-    cf = [per_policy[n]["by_kind"]["compile"] for n in names]
     wo = [per_policy[n]["by_kind"]["warning_only"] for n in names]
+    rt = [per_policy[n]["by_kind"]["runtime"] for n in names]
+    cr = [per_policy[n]["by_kind"]["crash"] for n in names]
+    inv = [per_policy[n]["by_kind"]["invalid"] +
+           per_policy[n]["by_kind"]["compile"]  # legacy logs may still use "compile"
+           for n in names]
     x = list(range(len(names)))
     plt.figure(figsize=(8, 5))
-    plt.bar(x, ok, label="ok", color="#9ecae1")
-    plt.bar(x, cf, bottom=ok, label="compile", color="#fdae6b")
-    plt.bar(x, wo, bottom=[a + b for a, b in zip(ok, cf)],
-            label="warning_only", color="#a1d99b")
+    plt.bar(x, inv, label="invalid (fuzzer noise)", color="#cccccc")
+    base = list(inv)
+    plt.bar(x, ok, bottom=base, label="ok", color="#9ecae1")
+    base = [a + b for a, b in zip(base, ok)]
+    plt.bar(x, wo, bottom=base, label="warning_only", color="#a1d99b")
+    base = [a + b for a, b in zip(base, wo)]
+    plt.bar(x, rt, bottom=base, label="runtime", color="#fd8d3c")
+    base = [a + b for a, b in zip(base, rt)]
+    plt.bar(x, cr, bottom=base, label="crash", color="#d62728")
     plt.xticks(x, names)
     plt.ylabel("unique signatures")
-    plt.title("Unique signatures by kind")
+    plt.title("Unique signatures by kind (v7: invalid separated)")
     plt.legend()
     plt.grid(alpha=0.3, axis="y")
     plt.tight_layout()
@@ -235,16 +263,26 @@ def build_markdown(per_policy, out_md, budget):
     lines.append("")
     lines.append("## 2. Headline results")
     lines.append("")
-    lines.append("| Policy | raw | unique | ok | compile | warning_only | elapsed (s) | unique/min |")
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("**`real_findings` excludes fuzzer-internal `invalid` inputs (compile-time "
+                 "failures from malformed MJCF). `real_bugs` = testcases flagged by "
+                 "`SpontaneousNanOracle` (finite input \u2192 NaN/Inf or spontaneous "
+                 "BADQPOS/BADQVEL/BADQACC; not user-injected).**")
+    lines.append("")
+    lines.append("| Policy | raw | real_unique | invalid | ok | warn | runtime | crash | real_bugs (raw / sig) | elapsed (s) |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for name, d in per_policy.items():
         s = d["summary"] or {}
         bk = d["by_kind"]
         elapsed = float(s.get("elapsed_sec", 0.0))
-        upm = (s.get("n_unique", 0) / (elapsed / 60.0)) if elapsed > 0 else 0.0
-        lines.append(f"| `{name}` | {s.get('n_raw','?')} | **{s.get('n_unique','?')}** | "
-                     f"{bk['ok']} | {bk['compile']} | {bk['warning_only']} | "
-                     f"{elapsed:.1f} | {upm:.2f} |")
+        invalid_cnt = bk.get("invalid", 0) + bk.get("compile", 0)
+        real_unique = (bk.get("ok", 0) + bk.get("warning_only", 0) +
+                       bk.get("runtime", 0) + bk.get("crash", 0) +
+                       bk.get("inconsistency", 0))
+        rb_raw, rb_sig = d.get("real_bug", (0, 0))
+        lines.append(f"| `{name}` | {s.get('n_raw','?')} | **{real_unique}** | {invalid_cnt} | "
+                     f"{bk.get('ok',0)} | {bk.get('warning_only',0)} | "
+                     f"{bk.get('runtime',0)} | {bk.get('crash',0)} | "
+                     f"{rb_raw} / {rb_sig} | {elapsed:.1f} |")
     lines.append("")
     lines.append("## 3. Plots")
     lines.append("")
@@ -260,7 +298,11 @@ def build_markdown(per_policy, out_md, budget):
     lines.append("### 3.4 Smoothed reward (window=50)")
     lines.append("![reward](reward_curve.png)")
     lines.append("")
-    lines.append("## 4. Top-10 signatures per policy")
+    lines.append("## 4. Top-10 real-finding signatures per policy")
+    lines.append("")
+    lines.append("*(`invalid` signatures \u2014 MutationSkip / compile failures from "
+                 "malformed MJCF \u2014 are excluded; they are fuzzer-internal noise, "
+                 "not MuJoCo bugs.)*")
     lines.append("")
     for name, d in per_policy.items():
         s = d["summary"] or {}
@@ -268,18 +310,31 @@ def build_markdown(per_policy, out_md, budget):
         lines.append("")
         lines.append("| sig | count | kind | exception | warnings |")
         lines.append("|---|---|---|---|---|")
-        for row in (s.get("top_signatures") or [])[:10]:
+        rows_sig = (s.get("top_signatures_real")
+                    or [r for r in (s.get("top_signatures") or [])
+                        if r.get("kind") not in ("invalid", "compile")])
+        for row in rows_sig[:10]:
             warns = ",".join(row.get("warnings") or []) or "-"
             etype = row.get("etype") or "-"
             lines.append(f"| `{row.get('sig')}` | {row.get('count')} | "
                          f"{row.get('kind')} | {etype} | {warns} |")
+        if not rows_sig:
+            lines.append("| _(none \u2014 only invalid inputs were produced)_ | | | | |")
         lines.append("")
     lines.append("## 5. Notes")
     lines.append("")
-    lines.append("- `unique` = distinct issue signatures (blake2s of failure_kind+etype+first_warning+topology).")
-    lines.append("- `compile` includes `MutationSkip` (a structural mutation produced an invalid tree).")
-    lines.append("- `warning_only` is dominated by `BADQVEL` / `BADCTRL` from STATE_PERTURB injection.")
-    lines.append("- Same seed and same hyperparameters across all policies. See `configs/default.yaml`.")
+    lines.append("- **`real_unique`** = ok + warning_only + runtime + crash + inconsistency. "
+                 "Invalid (compile-failures from malformed mutator output) are EXCLUDED "
+                 "and shown separately as `invalid` \u2014 they are not MuJoCo bugs.")
+    lines.append("- **`real_bugs`** comes from `SpontaneousNanOracle`: testcases where MuJoCo "
+                 "produced NaN/Inf/BAD-warnings WITHOUT us injecting NaN/Inf into the state. "
+                 "`raw` = #testcases, `sig` = #distinct signatures.")
+    lines.append("- Each step pre-compiles the mutated XML in the main process and resamples "
+                 "params up to N times if compile fails (GZFuzz-style validity gate, "
+                 "`run.validity_retries`). This collapses the old flood of trivial "
+                 "compile-fail signatures.")
+    lines.append("- See `outputs/real_bugs/*.json` for full diagnostics of each "
+                 "`real_bug_candidate` testcase.")
     with open(out_md, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
@@ -324,6 +379,7 @@ def main(argv=None):
             "by_kind": by_kind_unique_dict(load_summary(sp)),
             "mut_usage": mutator_usage(rows),
             "reward": smoothed_reward(rows, win=50),
+            "real_bug": real_bug_count(rows),
         }
         print(f"[loaded] {name}: rows={len(rows)}")
 

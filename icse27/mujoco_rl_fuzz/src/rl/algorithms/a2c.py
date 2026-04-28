@@ -16,13 +16,13 @@ if _HAS_TORCH:
 
 
 class A2CAlgorithm:
-    def __init__(self, d_in: int, n_mut: int, n_param_buckets: int = 16,
-                 n_rollout_buckets: int = 5, d_hidden: int = 128,
+    def __init__(self, d_in: int, n_mut: int, n_seed: int = 16,
+                 n_param_buckets: int = 16, n_rollout_buckets: int = 5, d_hidden: int = 128,
                  lr: float = 3e-4, gamma: float = 0.99,
                  entropy_coef: float = 0.01, value_coef: float = 0.5,
                  max_grad_norm: float = 0.5, device: str = "cpu"):
         require_torch()
-        self.net = ActorCritic(d_in, n_mut, n_param_buckets,
+        self.net = ActorCritic(d_in, n_mut, n_seed, n_param_buckets,
                                n_rollout_buckets, d_hidden).to(device)
         self.opt = optim.Adam(self.net.parameters(), lr=lr)
         self.gamma = gamma
@@ -38,6 +38,7 @@ class A2CAlgorithm:
                          dtype=torch.float32, device=self.device)
         masks = torch.tensor(np.array([b["mask"] for b in batch]),
                              dtype=torch.bool, device=self.device)
+        see = torch.tensor([b["seed_idx"] for b in batch], dtype=torch.long, device=self.device)
         mut = torch.tensor([b["mut_idx"] for b in batch], dtype=torch.long, device=self.device)
         par = torch.tensor([b["param_idx"] for b in batch], dtype=torch.long, device=self.device)
         rol = torch.tensor([b["roll_idx"] for b in batch], dtype=torch.long, device=self.device)
@@ -51,7 +52,7 @@ class A2CAlgorithm:
             returns.insert(0, R)
         ret_t = torch.tensor(returns, dtype=torch.float32, device=self.device)
 
-        log_prob, entropy, value = self.net.evaluate(x, masks, mut, par, rol)
+        log_prob, entropy, value = self.net.evaluate(x, masks, see, mut, par, rol)
         adv = (ret_t - value).detach()
         # standardise advantages
         if adv.numel() > 1:

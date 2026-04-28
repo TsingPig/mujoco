@@ -34,7 +34,8 @@ class ActorCriticPolicy:
     """Either A2C or PPO under the hood, selected by `algorithm`."""
 
     def __init__(self, algorithm: str = "ppo", history_k: int = 8,
-                 n_rollout_buckets: int = 5, hidden_dim: int = 128,
+                 n_rollout_buckets: int = 5, n_seeds: int = 16,
+                 hidden_dim: int = 128,
                  lr: float = 3e-4, gamma: float = 0.99,
                  entropy_coef: float = 0.01, value_coef: float = 0.5,
                  rollout_per_update: int = 64, device: str = "cpu",
@@ -43,12 +44,13 @@ class ActorCriticPolicy:
         self.name = f"actor_critic_{algorithm}"
         self.history_k = history_k
         self.n_rollout_buckets = n_rollout_buckets
+        self.n_seed = n_seeds
         self.n_param = len(PARAM_SEED_TABLE)
         self.n_mut = len(MUTATOR_IDS)
         self.d_in = state_dim(history_k=history_k)
         self.algo = make_algorithm(
             algorithm,
-            d_in=self.d_in, n_mut=self.n_mut,
+            d_in=self.d_in, n_mut=self.n_mut, n_seed=n_seeds,
             n_param_buckets=self.n_param,
             n_rollout_buckets=n_rollout_buckets,
             d_hidden=hidden_dim,
@@ -74,12 +76,13 @@ class ActorCriticPolicy:
         m = torch.tensor([action_mask], dtype=torch.bool, device=self.device)
         with torch.no_grad():
             out = self.algo.net.act(x, mask=m)
+        seed_idx = int(out["seed_idx"].item())
         mut_idx = int(out["mut_idx"].item())
         param_idx = int(out["param_idx"].item())
         roll_idx = int(out["roll_idx"].item())
         log_prob = float(out["log_prob"].item())
         value = float(out["value"].item())
-        self._last_act = {"mut_idx": mut_idx, "param_idx": param_idx,
+        self._last_act = {"seed_idx": seed_idx, "mut_idx": mut_idx, "param_idx": param_idx,
                           "roll_idx": roll_idx, "log_prob": log_prob,
                           "value": value}
         self._last_state = state_vec
@@ -88,6 +91,7 @@ class ActorCriticPolicy:
             mutator_idx=mut_idx,
             param_seed=PARAM_SEED_TABLE[param_idx % self.n_param],
             rollout_bucket_idx=roll_idx,
+            seed_idx=seed_idx,
         )
 
     def update(self, batch: list[Transition]) -> dict[str, float]:
@@ -98,6 +102,7 @@ class ActorCriticPolicy:
             self._buf.append({
                 "state_vec": self._last_state,
                 "mask": self._last_mask or [True] * self.n_mut,
+                "seed_idx": self._last_act["seed_idx"],
                 "mut_idx": self._last_act["mut_idx"],
                 "param_idx": self._last_act["param_idx"],
                 "roll_idx": self._last_act["roll_idx"],
