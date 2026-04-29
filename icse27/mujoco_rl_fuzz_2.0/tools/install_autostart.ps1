@@ -1,8 +1,11 @@
 <#
 .SYNOPSIS
-    Register a Windows Scheduled Task so viz_gui.py runs at user logon
+    Register a Windows logon-time autostart so viz_gui2.py runs at user logon
     (port 9000, no console window). After install, every boot/logon you can
     just open http://127.0.0.1:9000/ — no manual start needed.
+
+    NOTE: this targets viz_gui2.py (seeds 2.0, categorized & collapsible).
+    The legacy viz_gui.py is no longer autostarted.
 
 .PARAMETER Port
     HTTP port (default 9000).
@@ -18,13 +21,8 @@
     Also kick off the task immediately after installing.
 
 .EXAMPLES
-    # Install and start now
     pwsh tools\install_autostart.ps1 -Now
-
-    # Use a specific interpreter
     pwsh tools\install_autostart.ps1 -PythonExe "E:\--IDLE\pythonw.exe" -Now
-
-    # Remove
     pwsh tools\install_autostart.ps1 -Uninstall
 #>
 [CmdletBinding()]
@@ -36,17 +34,18 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$TaskName = "MJFuzzVizGUI"
+$TaskName = "MJFuzzVizGUI2"
+$LegacyTaskName = "MJFuzzVizGUI"
 
 # Project root = parent of this tools/ folder.
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$VizScript   = Join-Path $ProjectRoot "tools\viz_gui.py"
+$VizScript   = Join-Path $ProjectRoot "tools\viz_gui2.py"
 $LogDir      = Join-Path $ProjectRoot ".cache"
-$LogFile     = Join-Path $LogDir "viz_gui.log"
+$LogFile     = Join-Path $LogDir "viz_gui2.log"
 
 
 if (-not (Test-Path $VizScript)) {
-    throw "viz_gui.py not found: $VizScript"
+    throw "viz_gui2.py not found: $VizScript"
 }
 
 # Resolve pythonw.exe (preferred to suppress console window).
@@ -82,10 +81,20 @@ if ($Uninstall) {
     } else {
         Write-Host "[noop] '$TaskName' not found in registry Run key"
     }
+    if (Get-ItemProperty -Path $RunKey -Name $LegacyTaskName -ErrorAction SilentlyContinue) {
+        Remove-ItemProperty -Path $RunKey -Name $LegacyTaskName
+        Write-Host "[ok] also removed legacy autostart entry '$LegacyTaskName'"
+    }
     # Also kill any running instance
     Get-Process -Name "python" -ErrorAction SilentlyContinue |
         Where-Object { $_.MainWindowTitle -eq "" } | ForEach-Object { $_.Kill() }
     return
+}
+
+# Always remove the legacy viz_gui.py autostart (user requested gui1 no longer auto-starts).
+if (Get-ItemProperty -Path $RunKey -Name $LegacyTaskName -ErrorAction SilentlyContinue) {
+    Remove-ItemProperty -Path $RunKey -Name $LegacyTaskName
+    Write-Host "[ok] removed legacy viz_gui.py autostart entry '$LegacyTaskName'"
 }
 
 # Write (or overwrite) the Run entry
@@ -120,10 +129,10 @@ if ($Now) {
         } catch {}
     }
     if ($ok) {
-        Write-Host "[ok] viz_gui is listening at http://127.0.0.1:$Port/"
+        Write-Host "[ok] viz_gui2 is listening at http://127.0.0.1:$Port/"
     } else {
         Write-Host "[warn] port $Port not responding yet — check for import errors:"
-        Write-Host "       cd `"$ProjectRoot`"; python tools\viz_gui.py"
+        Write-Host "       cd `"$ProjectRoot`"; python tools\viz_gui2.py"
     }
 }
 

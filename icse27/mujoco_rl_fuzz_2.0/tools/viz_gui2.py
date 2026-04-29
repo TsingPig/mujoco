@@ -35,6 +35,382 @@ SEEDS2_DIR = ROOT / "seeds2"
 TOOLS_DIR = ROOT / "tools"
 PYTHON = sys.executable
 
+# Source -> {license SPDX, upstream repo, 中文用途说明}. Mirrors viz_gui.py.
+SOURCE_INFO: dict[str, dict[str, str]] = {
+    "mujoco": {
+        "license": "Apache-2.0",
+        "repo":    "github.com/google-deepmind/mujoco",
+        "desc":    "MuJoCo 官方仓库示例模型（humanoid、car、cards、tendon_arm 等），覆盖引擎核心特性的最小可复现场景。",
+    },
+    "menagerie": {
+        "license": "Apache-2.0",
+        "repo":    "github.com/google-deepmind/mujoco_menagerie",
+        "desc":    "DeepMind 维护的高质量真实机器人模型库（Franka、UR5e、Spot、ANYmal、ALOHA、Shadow Hand 等），对几何/惯量/驱动器参数做过校准。",
+    },
+    "dm_control": {
+        "license": "Apache-2.0",
+        "repo":    "github.com/google-deepmind/dm_control",
+        "desc":    "DeepMind Control Suite——经典 RL benchmark（cartpole、cheetah、walker、quadruped 等），任务难度可控，适合控制类策略 fuzz。",
+    },
+    "gym_robotics": {
+        "license": "MIT",
+        "repo":    "github.com/Farama-Foundation/Gymnasium-Robotics",
+        "desc":    "Farama Gymnasium-Robotics（Fetch、HandManipulate、PointMaze 等），稀疏/密集奖励的目标到达类操作任务。",
+    },
+    "mujoco_mpc": {
+        "license": "Apache-2.0",
+        "repo":    "github.com/google-deepmind/mujoco_mpc",
+        "desc":    "DeepMind MJPC 任务模型（Cartpole-Swingup、Quadruped、Humanoid-Walk 等），约束/接触组合较多。",
+    },
+    "robosuite": {
+        "license": "MIT",
+        "repo":    "github.com/ARISE-Initiative/robosuite",
+        "desc":    "ARISE 模块化机械臂操作框架（Lift、Stack、PickPlace、Door 等），单/双臂 + 多种 gripper。",
+    },
+    "mjx": {
+        "license": "Apache-2.0",
+        "repo":    "github.com/google-deepmind/mujoco",
+        "desc":    "MJX（MuJoCo 的 JAX 后端）官方示例模型，适合 GPU 批量并行的几何/约束子集。",
+    },
+    "robocasa": {
+        "license": "MIT",
+        "repo":    "github.com/robocasa/robocasa",
+        "desc":    "RoboCasa 大规模厨房模拟器：100+ 原子任务 + long-horizon composite，最接近真实机械臂做饭的开源场景。",
+    },
+    "libero": {
+        "license": "MIT",
+        "repo":    "github.com/Lifelong-Robot-Learning/LIBERO",
+        "desc":    "LIBERO 130 个长程操作任务（kitchen / study / living），专为 lifelong learning 设计。",
+    },
+    "mimicgen": {
+        "license": "MIT",
+        "repo":    "github.com/NVlabs/mimicgen",
+        "desc":    "NVIDIA MimicGen：Coffee、Stack-Three、Threading、Square 等多步操作场景。",
+    },
+    "safety_gymnasium": {
+        "license": "Apache-2.0",
+        "repo":    "github.com/PKU-Alignment/safety-gymnasium",
+        "desc":    "PKU 安全 RL benchmark（Car/Point/Doggo + hazards/pillars/vases）。",
+    },
+    "myosuite": {
+        "license": "Apache-2.0",
+        "repo":    "github.com/MyoHub/myosuite",
+        "desc":    "MyoSuite 高保真生物力学模型，含大量 tendon/site/equality 约束。",
+    },
+    "mujoco_playground": {
+        "license": "Apache-2.0",
+        "repo":    "github.com/google-deepmind/mujoco_playground",
+        "desc":    "MuJoCo Playground（DeepMind）：dm_control_suite 标准化版本，便于做后端兼容性 fuzz。",
+    },
+    "composed": {
+        "license": "inherits parent",
+        "repo":    "tools/compose_arena.py",
+        "desc":    "compose_arena.py 用 <replicate> 把若干父种子拼成的多实例 arena。",
+    },
+    "unknown": {"license": "?", "repo": "?", "desc": "未识别来源。"},
+}
+
+
+def _upstream_url(repo: str | None, commit: str | None,
+                  src_rel_path: str | None) -> str | None:
+    """GitHub blob URL for the seed's original XML, or None when unknown."""
+    if not repo or not repo.startswith("github.com/"):
+        return None
+    base = f"https://{repo.rstrip('/')}"
+    if not commit or not src_rel_path:
+        return base
+    rel = str(src_rel_path).replace("\\", "/")
+    return f"{base}/blob/{commit}/{rel}"
+
+
+# --------------------------------------------------------------------------
+# 中文释义字典：列头 / operator / oracle。供前端浮层弹窗使用。
+# --------------------------------------------------------------------------
+COLUMN_TIPS: dict[str, str] = {
+    "name":   "种子名（curated 文件夹名）。点击 ▶ 实时跑、◻ 静态查看、⧉ 复制路径、M 送入 mutator、🌐 打开上游 GitHub。",
+    "source": "种子来源仓库。鼠标移到 source 标签上可看仓库背景介绍。",
+    "nq":     "<b>nq</b>：广义坐标维度（自由度配置数）。每个 free joint +7、ball +4、hinge/slide +1。",
+    "nv":     "<b>nv</b>：广义速度维度。free joint +6、ball +3、hinge/slide +1。一般 nv ≤ nq。",
+    "nbody":  "<b>nbody</b>：&lt;body&gt; 节点总数（含 worldbody）。反映场景物体数量与运动学树规模。",
+    "ngeom":  "<b>ngeom</b>：&lt;geom&gt; 总数。包含可视和碰撞几何体；越大越接近真实，但接触求解越慢。",
+    "nu":     "<b>nu</b>：actuator 数量（电机/位置/速度/通用控制器）。决定 ctrl 向量长度。",
+    "act":    "操作动作（实时跑 / 静态查看 / 复制路径 / 送入 mutator / 打开上游 GitHub）。",
+}
+
+OPERATOR_TIPS: dict[str, str] = {
+    # —— XML / 资源 / 加载链路 ——
+    "file_existence_scan": "扫描 XML 引用的资源文件是否存在",
+    "meshdir_texturedir_mutation": "改写 compiler 的 meshdir/texturedir 路径",
+    "include_path_rewrite": "改写 &lt;include&gt; 的相对/绝对路径",
+    "autolimits_toggle": "切换 compiler.autolimits（自动 joint range）",
+    "urdf_mjcf_roundtrip": "URDF→MJCF→URDF 往返一致性",
+    "pymjcf_native_diff_load": "dm_control PyMJCF vs 原生 mujoco 加载差异",
+    "version_matrix_compile": "多 mujoco 版本下编译同一 XML",
+    "asset_reachability": "<i>(此处亦作 operator)</i> 检查所有 asset 引用",
+    # —— 物理参数变异 ——
+    "gravity_toggle": "开关重力或翻转 g 向量",
+    "timestep_integrator_sweep": "扫描 timestep + integrator 组合",
+    "integrator_switch": "切换积分器（Euler/RK4/implicit）",
+    "solver_switch": "切换求解器（PGS/CG/Newton）",
+    "solver_iter_sweep": "扫描求解器迭代次数",
+    "warm_start_toggle": "开关求解器 warm-start",
+    "x64_toggle": "float32 / float64 精度切换",
+    # —— 质量 / 惯量 / 几何 ——
+    "mass_scale": "整体或单 body 质量缩放",
+    "diaginertia_scale": "对角惯量缩放",
+    "damping_armature_scale": "joint damping / armature 缩放",
+    "inertial_pos_quat_perturb": "惯性元 pos / quat 微扰",
+    "mass_matrix_readback": "读取并校验质量矩阵 M",
+    "object_mass_size_friction_mutation": "物体质量 / 尺寸 / 摩擦三联变异",
+    "diaginertia_scale ": "对角惯量缩放",
+    # —— 驱动器 / 控制 ——
+    "gear_magnitude_scale": "actuator gear 幅值缩放",
+    "gear_sign_flip": "actuator gear 符号反转",
+    "ctrlrange_mutation": "actuator ctrlrange 变异",
+    "joint_range_mutation": "joint range 变异",
+    "actdim_action_mutation": "actuator actdim / action 维度变异",
+    "single_actuator_sweep": "逐 actuator 扫描激励",
+    "single_joint_target_sweep": "逐 joint 目标位置扫描",
+    "finger_actuator_sweep": "手指 actuator 力扫描",
+    "gripper_force_sweep": "夹爪力扫描",
+    "kp_kd_sweep": "PD 增益 kp/kd 扫描",
+    "healthy_range_sweep": "扫描 healthy_range（locomotion 任务）",
+    "controller_switch": "切换 controller 类型",
+    "small_ctrl_pulse": "注入小幅控制脉冲",
+    "small_torque": "注入小力矩",
+    "off_center_impulse": "施加偏心冲量",
+    "base_push": "对 base/torso 施加推力",
+    "hold_stationary": "保持静止状态",
+    "zero_control_rollout": "零控制信号 rollout",
+    "actuator_force_perturb": "对 actuator 力做小扰动",
+    "sensor_force_perturb": "对力传感器读数做扰动",
+    "left_right_mirror_compare": "左右镜像对比",
+    # —— 接触 ——
+    "contact_margin_friction_solref_solimp_mutation": "接触 margin/friction/solref/solimp 变异",
+    "contact_pair_generation": "显式生成 &lt;pair&gt; 接触对",
+    "contact_exclusion_toggle": "开关 &lt;exclude&gt; 接触排除",
+    "contact_boundary_sweep": "刚体在接触边界附近的位姿扫描",
+    "cylinder_plane_boundary_sweep": "圆柱-平面接触边界扫描",
+    "collision_geom_mutation": "替换 collision geom 类型(sphere/box/capsule)",
+    "visual_collision_aabb_compare": "可视 vs 碰撞 geom AABB 对比",
+    # —— 状态 / 重置 / 回放 ——
+    "get_set_state_replay": "set_state→get_state 回放",
+    "contact_rich_state_capture": "保存接触丰富状态快照",
+    "contact_rich_state_reset": "从接触丰富状态恢复",
+    "target_qpos_replay": "用 target qpos 回放",
+    "same_action_replay": "同一动作序列重放",
+    "same_seed_repeated_reset": "同 seed 重复 reset",
+    "seed_sweep": "seed 扫描",
+    "hard_reset_toggle": "软 / 硬 reset 切换",
+    "home_keyframe_reset": "用 home keyframe reset",
+    "task_reset_mutation": "任务 reset 选项变异",
+    "deepcopy_clone": "deepcopy 克隆 env",
+    "mocap_weld_reset": "mocap / weld reset 后位姿",
+    "eq_active_toggle": "&lt;equality&gt; active 开关",
+    # —— 场景 / 位姿 ——
+    "floor_table_object_pose_mutation": "floor / table / object 位姿变异",
+    "table_floor_pose_mutation": "桌面 / 地面位姿变异",
+    "mount_pose_mutation": "末端 / 机座 mount 位姿变异",
+    "attach_site_mutation": "attach site 位置变异",
+    "custom_site_body_inject": "注入自定义 site / body",
+    "obs_shape_mutation": "改变 observation 形状",
+    "info_obs_consistency": "info dict 与 obs 一致性",
+    "sensor_readback": "sensor 读回",
+    # —— 动力学 / 数值 ——
+    "fk_recompute": "多次重算前向运动学",
+    "inverse_dynamics_compare": "正 / 逆动力学交叉验证",
+    "inv_dyn_ctrl_reconstruction": "由 qacc 反推 ctrl 并重放",
+    "jax_grad_jac": "JAX 求梯度 / 雅可比",
+    # —— MJX / 后端 ——
+    "mjx_classic_diff": "MJX vs Classic 后端差分",
+    "classic_vs_mjx_diff": "Classic vs MJX 后端差分（同上别名）",
+    "mjx_state_get_put": "MJX 状态 put / get 往返",
+    "batched_vmap_action": "vmap 批量执行同一动作",
+    "batch_size_sweep": "扫描 batch size",
+    "gpu_device_select": "选择不同 GPU 设备",
+    # —— 安装 / 版本矩阵 ——
+    "cuda_jax_version_matrix": "CUDA + JAX 版本矩阵",
+    "cython_matrix": "Cython 编译矩阵",
+    "python_version_matrix": "Python 版本矩阵",
+    "mujoco_version_matrix": "MuJoCo 版本矩阵",
+    "compiler_os_matrix": "编译器 / OS 矩阵",
+    "ci_cold_install": "CI 冷安装(无缓存)",
+    "package_import_smoke": "仅 import 包做最小 smoke",
+    "import_context_pollution": "检查 import 顺序污染",
+    "plugin_toggle": "开关 mujoco plugin",
+    # —— 渲染 ——
+    "gl_backend_env": "改 GL backend 环境变量(MUJOCO_GL)",
+    "gl_backend_switch": "切换 GL backend(EGL/GLFW/OSMesa)",
+    "multi_camera": "渲染多相机",
+    "multi_episode_render_context": "跨 episode 渲染上下文复用",
+    "record_video_wrapper": "VideoRecorder wrapper",
+    "renderer_randomization_mutation": "渲染随机化(光照/材质)",
+    "same_state_multi_render": "同状态多次渲染",
+    "deformable_skin_render": "渲染可变形 skin",
+    "sync_vector_env_render": "SyncVectorEnv 渲染",
+    # —— 任务 / RL ——
+    "ppo_smoke": "PPO 训练 smoke run",
+    "reach_close_lift_seq": "reach→close→lift 抓取序列",
+    "reward_pre_post_diff": "reward 转移前后差分",
+    "mujoco_vs_mujoco_py": "mujoco vs mujoco-py 一致性",
+    "docs_api_param_scan": "文档 API 参数扫描",
+}
+
+ORACLE_TIPS: dict[str, str] = {
+    "action_space_consistency": "动作空间形状/dtype 一致",
+    "actuator_axis_isolation": "actuator 轴独立(无串扰)",
+    "api_field_existence": "API 字段是否存在",
+    "asset_reachability": "&lt;mesh/texture/include&gt; 资源可达",
+    "base_height_drop": "base / torso 高度跌落检测",
+    "black_frame": "渲染输出全黑帧",
+    "build_wheel_success": "编译 wheel 成功",
+    "camera_frame_schema": "相机输出 frame 形状 / dtype",
+    "cloned_env_divergence": "deepcopy 后行为发散",
+    "com_drift": "重心漂移",
+    "com_vs_mesh_centroid": "COM 与 mesh 几何中心一致",
+    "constant_observation_detector": "obs 始终为常量(传感器死)",
+    "contact_count_force_diff": "接触数与合力差分",
+    "contact_force_magnitude": "接触力幅值合理",
+    "contact_force_spike": "接触力毛刺",
+    "contact_pair_consistency": "接触对一致性",
+    "contact_sensor_consistency": "接触传感器一致性",
+    "contact_stability": "接触稳定性",
+    "cpu_gpu_diff": "CPU / GPU 后端差分",
+    "cross_env_frame_contamination": "跨 env 渲染帧污染",
+    "cross_version_compile_consistency": "跨版本编译一致性",
+    "dependency_resolver": "pip 依赖解析",
+    "documented_arg_effective": "文档参数实际生效",
+    "drone_yaw_roll_pitch_torque_balance": "无人机 yaw/roll/pitch 力矩平衡",
+    "end_effector_pose_error": "末端位姿误差",
+    "finger_symmetry": "手指左右对称",
+    "fk_sensor_residual": "FK 与传感器残差",
+    "floor_tunneling": "物体穿透地面",
+    "framebuffer_completeness": "framebuffer 完整性",
+    "from_xml_path_success": "from_xml_path 加载成功",
+    "gradient_finite": "梯度有限(无 NaN/Inf)",
+    "grasp_success": "抓取是否成功",
+    "gripper_collapse": "夹爪坍缩(自穿透)",
+    "image_flip": "图像上下颠倒",
+    "import_success": "import 是否成功",
+    "info_pos_eq_xpos": "info.pos == data.xpos",
+    "initial_state_equality": "初始状态相等",
+    "install_timeout": "安装超时",
+    "jacobian_finite": "雅可比有限",
+    "kinetic_energy_spike": "动能毛刺",
+    "left_right_param_consistency": "左右参数一致",
+    "mass_bbox_inertia_plausibility": "质量 / 包围盒 / 惯量合理",
+    "mass_matrix_finite_psd": "质量矩阵 M 有限且半正定",
+    "mjx_vs_classic_contact_diff": "MJX vs Classic 接触差分",
+    "mocap_pose_residual": "mocap 位姿残差",
+    "native_vs_pymjcf_consistency": "原生 vs PyMJCF 一致性",
+    "object_slip": "物体滑动",
+    "object_teleport_after_set_state": "set_state 后物体瞬移",
+    "obs_schema": "observation 模式(shape/dtype)",
+    "obs_trajectory_equality": "obs 轨迹相等",
+    "oscillation_amplitude": "振荡幅度",
+    "overshoot_settling": "超调与稳定时间",
+    "param_patch_diff": "参数补丁前后差分",
+    "penetration_after_set_state": "set_state 后穿透",
+    "penetration_depth": "穿透深度",
+    "pixel_hash_determinism": "像素 hash 确定性",
+    "platform_compile_error": "平台编译错误",
+    "plugin_recognition": "plugin 识别",
+    "precision_mismatch": "精度不匹配",
+    "qfrc_actuator_inv_dyn_residual": "qfrc_actuator 与逆动力学残差",
+    "qpos_qvel_qacc_finite": "qpos/qvel/qacc 有限",
+    "radius_of_gyration": "回转半径合理",
+    "render_exception_class": "渲染异常类型",
+    "reward_component_identity": "reward 分量恒等",
+    "reward_timing_post_transition": "reward 时序在 transition 后",
+    "runtime_abi_mismatch": "运行时 ABI 不匹配",
+    "same_seed_backend_divergence": "同 seed 不同后端发散",
+    "schema_violation_class": "schema 违反类型",
+    "segfault": "段错误",
+    "self_intersection": "自交",
+    "sensor_acc_residual": "加速度传感器残差",
+    "sensor_backend_residual": "传感器后端残差",
+    "shape_mismatch": "形状不匹配",
+    "small_perturb_response": "小扰动响应",
+    "state_space_key_consistency": "状态字典 key 一致",
+    "state_trajectory_residual": "状态轨迹残差",
+    "target_vs_actual_steady_state": "目标 vs 实际稳态",
+    "task_metric_regression": "任务指标回归",
+    "training_abort": "训练中止",
+    "unexpected_arm_motion": "机械臂异常运动",
+    "unexpected_initial_contact": "初始非预期接触",
+    "wrong_backend": "后端被错误选中",
+    "xla_runtime_error": "XLA 运行时错误",
+    "zero_target_drift": "零目标漂移",
+}
+
+
+def _seed_kind(name: str, source: str) -> str:
+    """对 seed 名称做启发式归类，返回 1 句中文模型类型说明。"""
+    n = name.lower()
+    rules: list[tuple[tuple[str, ...], str]] = [
+        (("humanoid", "h1", "g1", "atlas"),                "人形 humanoid 全身铰链模型"),
+        (("walker", "hopper", "cheetah", "ant"),           "经典 RL locomotion 基准（DM Control / Gym）"),
+        (("quadruped", "anymal", "spot", "go1", "go2", "b1", "aliengo", "laikago"),
+                                                            "四足机器人 locomotion 模型"),
+        (("cartpole", "pendulum", "acrobot", "lqr",
+          "ball_in_cup", "swimmer", "reacher", "fish",
+          "point_mass"),                                    "经典控制 / 低维 RL benchmark"),
+        (("crazyflie", "skydio", "x2", "drone", "quadcopter", "aerial",
+          "bitcraze"),                                      "无人机 / 旋翼 aerial 模型"),
+        (("franka", "panda", "ur5", "ur10", "kuka", "iiwa",
+          "lite6", "xarm", "sawyer", "jaco", "kinova",
+          "widowx", "viperx", "aloha", "baxter"),           "工业 / 协作机械臂模型"),
+        (("hand", "shadow", "mpl", "leap", "robotiq",
+          "gripper", "finger"),                             "手 / 夹爪 / 多指操作模型"),
+        (("kitchen", "stove", "cabinet", "faucet", "drawer",
+          "microwave", "fridge", "sink", "basin"),          "厨房 / 家居室内操作场景"),
+        (("myo",),                                          "MyoSuite 高保真生物力学肌骨模型"),
+        (("dog", "fruitfly"),                               "DM Control 生物形态模型"),
+        (("car", "vehicle"),                                "车辆 / 移动平台模型"),
+        (("cards", "tendon", "net", "cloth", "rope",
+          "duplo", "balloon", "cube"),                      "MuJoCo 引擎特性 demo（柔体 / 张拉 / 小物件）"),
+        (("composed", "arena"),                             "compose_arena 拼装多实例场景"),
+        (("scene", "world"),                                "场景级 XML（含地面 / 灯光 / 多物体）"),
+    ]
+    for keys, desc in rules:
+        if any(k in n for k in keys):
+            return desc
+    return f"{source} 来源的 MuJoCo MJCF 模型"
+
+
+def _seed_tip_html(m: dict) -> str:
+    """构造 seed 行的浮层 HTML（标题 + 简介 + 统计 + 路径 + 上游链接）。"""
+    def _esc(s: object) -> str:
+        return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace('"', "&quot;"))
+    name = m.get("name", "?")
+    src = m.get("source") or "?"
+    kind = _seed_kind(name, src)
+    nq = m.get("nq"); nv = m.get("nv")
+    nbody = m.get("nbody"); ngeom = m.get("ngeom"); nu = m.get("nu")
+    parts = [
+        f'<div class="tip-h"><b>{_esc(name)}</b></div>',
+        f'<div class="tip-line">{_esc(kind)}</div>',
+        '<div class="tip-sep"></div>',
+        f'<div class="tip-line"><b>来源</b>：{_esc(src)}'
+        f' &nbsp;<span class="tip-dim">({_esc(m.get("license") or "?")})</span></div>',
+    ]
+    if m.get("source_desc"):
+        parts.append(f'<div class="tip-line tip-dim">{_esc(m["source_desc"])}</div>')
+    parts.append(
+        f'<div class="tip-line"><b>规模</b>：'
+        f'nq={_esc(nq)} · nv={_esc(nv)} · nbody={_esc(nbody)}'
+        f' · ngeom={_esc(ngeom)} · nu={_esc(nu)}</div>'
+    )
+    xml_path = m.get("xml_path") or f"seeds/curated/{name}/model.xml"
+    parts.append(f'<div class="tip-line tip-dim">本地：<code>{_esc(xml_path)}</code></div>')
+    if m.get("commit"):
+        parts.append(f'<div class="tip-line tip-dim">commit：<code>{_esc(m["commit"])[:12]}</code></div>')
+    if m.get("upstream_url"):
+        parts.append(f'<div class="tip-line">🌐 <code>{_esc(m["upstream_url"])}</code></div>')
+    return "".join(parts)
+
+
 _CACHE: dict | None = None
 
 
@@ -54,6 +430,16 @@ def _load() -> dict:
         cats = yaml.safe_load(cats_path.read_text(encoding="utf-8")).get("categories", [])
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     by_name = {m["name"]: m for m in manifest}
+    # Enrich every manifest entry with license / repo / upstream_url so the
+    # frontend can render the cloud-link button + hover tooltip.
+    for m in manifest:
+        info = SOURCE_INFO.get(m.get("source") or "unknown", SOURCE_INFO["unknown"])
+        m["license"] = info["license"]
+        m["repo"] = info["repo"]
+        m["source_desc"] = info["desc"]
+        m["upstream_url"] = _upstream_url(info["repo"], m.get("commit"),
+                                          m.get("src_rel_path"))
+        m["tip_html"] = _seed_tip_html(m)
     grouped: dict[str, list[dict]] = {c["id"]: [] for c in cats}
     for m in manifest:
         for cid in m.get("categories", []):
@@ -122,10 +508,23 @@ INDEX_HTML = """<!doctype html>
                font-family: ui-monospace, Consolas, monospace; font-size: 12px;
                text-align: center; margin-right: 8px; }
   .cat-meta  { color: #888; font-weight: 400; font-size: 12px; margin-left: 8px; }
-  .cat-desc  { color: #888; font-size: 12px; margin: 4px 0 8px 44px; }
-  .ops       { font-size: 11px; color: #666; margin: 4px 0 8px 44px;
-               font-family: ui-monospace, Consolas, monospace; }
-  .ops b     { color: inherit; font-family: ui-sans-serif; }
+  .cat-desc  { color: #555; font-size: 13px; margin: 6px 0 10px 44px;
+               line-height: 1.45; }
+  .ops-block { margin: 6px 0 4px 44px; padding: 8px 12px;
+               border-left: 3px solid #2563eb55; border-radius: 4px;
+               background: linear-gradient(90deg, #2563eb0d, transparent); }
+  .ops-block.oracle-block { border-left-color: #16a34a88;
+               background: linear-gradient(90deg, #16a34a10, transparent); }
+  .ops-label { display: inline-block; font-size: 11px; font-weight: 700;
+               text-transform: uppercase; letter-spacing: .04em;
+               color: #2563eb; margin-right: 6px; }
+  .ops-block.oracle-block .ops-label { color: #16a34a; }
+  .ops-chip  { display: inline-block; font-family: ui-monospace, Consolas, monospace;
+               font-size: 12px; padding: 2px 8px; margin: 2px 4px 2px 0;
+               background: #ffffff10; border: 1px solid #8884; border-radius: 5px;
+               color: inherit; }
+  .ops-chip:hover { border-color: #2563eb; color: #2563eb; }
+  .oracle-block .ops-chip:hover { border-color: #16a34a; color: #16a34a; }
   table.seeds { width: 100%; border-collapse: collapse; font-size: 12px;
                 margin-top: 4px; }
   table.seeds th { text-align: left; font-weight: 500; color: #888;
@@ -158,6 +557,27 @@ INDEX_HTML = """<!doctype html>
          background: #0001; padding: 8px; border-radius: 6px; max-height: 160px;
          overflow: auto; white-space: pre-wrap; }
   mark { background: #fde047; color: inherit; padding: 0 1px; border-radius: 2px; }
+
+  /* ---- 浮层弹窗（替代浏览器原生 title） ---- */
+  #tip-pop { position: fixed; display: none; z-index: 9999;
+             max-width: 420px; padding: 10px 12px;
+             background: #1f2937; color: #f3f4f6;
+             border: 1px solid #4b5563; border-radius: 8px;
+             box-shadow: 0 8px 28px #0008;
+             font-size: 12px; line-height: 1.55; pointer-events: none;
+             font-family: ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  #tip-pop b      { color: #93c5fd; font-weight: 600; }
+  #tip-pop code   { background: #374151; padding: 1px 5px; border-radius: 3px;
+                    font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+                    color: #fde68a; word-break: break-all; }
+  #tip-pop .tip-h { font-size: 13px; margin-bottom: 4px; color: #e5e7eb; }
+  #tip-pop .tip-line { margin: 2px 0; }
+  #tip-pop .tip-dim  { color: #9ca3af; }
+  #tip-pop .tip-sep  { height: 1px; background: #4b5563; margin: 6px 0; }
+  [data-tip]      { cursor: help; }
+  .ops-chip[data-tip] { cursor: help; }
+  table.seeds th[data-tip]    { border-bottom-style: dashed; }
+  table.seeds tr[data-tip] td:first-child { position: relative; }
 </style>
 </head>
 <body>
@@ -213,6 +633,39 @@ INDEX_HTML = """<!doctype html>
 <script>
 const STATE = __STATE__;          // {cats, grouped, manifest, uncategorized}
 const MUTS = __MUTS__;
+const TIPS = __TIPS__;            // {col, op, or, src}
+
+// ---- 浮层弹窗：监听全局 mouseover/mouseout，定位跟随鼠标 ----
+const $tip = document.createElement("div");
+$tip.id = "tip-pop";
+document.body.appendChild($tip);
+function _placeTip(evt) {
+  const pad = 14, w = $tip.offsetWidth, h = $tip.offsetHeight;
+  let x = evt.clientX + pad, y = evt.clientY + pad;
+  if (x + w > window.innerWidth  - 8) x = evt.clientX - w - pad;
+  if (y + h > window.innerHeight - 8) y = evt.clientY - h - pad;
+  if (x < 8) x = 8;
+  if (y < 8) y = 8;
+  $tip.style.left = x + "px";
+  $tip.style.top  = y + "px";
+}
+document.addEventListener("mouseover", e => {
+  const el = e.target.closest("[data-tip]");
+  if (!el) return;
+  const html = el.getAttribute("data-tip");
+  if (!html) return;
+  $tip.innerHTML = html;
+  $tip.style.display = "block";
+  _placeTip(e);
+});
+document.addEventListener("mousemove", e => {
+  if ($tip.style.display === "block") _placeTip(e);
+});
+document.addEventListener("mouseout", e => {
+  const el = e.target.closest("[data-tip]");
+  if (el) $tip.style.display = "none";
+});
+window.addEventListener("scroll", () => { $tip.style.display = "none"; }, true);
 const $log = document.getElementById("log");
 const $catsRoot = document.getElementById("cats");
 const $filter = document.getElementById("filter");
@@ -264,29 +717,40 @@ function buildSeedTable(seeds, q) {
   const rows = filtered.map(s => {
     const xmlPath = s.xml_path || `seeds/curated/${s.name}/model.xml`;
     const tier = s.tier === "asset" ? '<span class="pill tier">asset</span>' : '';
+    const seedTip = s.tip_html || (`<b>${escHtml(s.name)}</b>`);
+    const srcTip = TIPS.src[s.source] || "(未知来源)";
+    const linkBtn = s.upstream_url
+      ? `<button class="ghost iconbtn" data-act="link" data-url="${escHtml(s.upstream_url)}" data-tip="在 GitHub 打开上游 XML：<br><code>${escHtml(s.upstream_url)}</code>">&#127760;</button>`
+      : `<button class="ghost iconbtn" disabled data-tip="未知上游链接" style="opacity:.35">&#127760;</button>`;
     return `
-      <tr>
+      <tr data-tip="${escHtml(seedTip)}">
         <td><span class="seed-name">${highlight(s.name, q)}</span> ${tier}</td>
-        <td><span class="pill src">${escHtml(s.source||"?")}</span></td>
+        <td><span class="pill src" data-tip="<b>${escHtml(s.source||"?")}</b> &nbsp;<span class='tip-dim'>(${escHtml(s.license||"?")})</span><div class='tip-sep'></div>${escHtml(srcTip)}">${escHtml(s.source||"?")}</span></td>
         <td class="num">${s.nq ?? "?"}</td>
         <td class="num">${s.nv ?? "?"}</td>
         <td class="num">${s.nbody ?? "?"}</td>
         <td class="num">${s.ngeom ?? "?"}</td>
         <td class="num">${s.nu ?? "?"}</td>
         <td>
-          <button class="primary iconbtn" data-act="run" data-name="${escHtml(s.name)}" title="实时跑">▶</button>
-          <button class="ghost iconbtn"   data-act="static" data-name="${escHtml(s.name)}" title="静态查看">◻</button>
-          <button class="ghost iconbtn"   data-act="copy" data-path="${escHtml(xmlPath)}" title="复制 XML 路径">⧉</button>
-          <button class="ghost iconbtn"   data-act="mut"  data-name="${escHtml(s.name)}" title="送入 mutator 区">M</button>
+          <button class="primary iconbtn" data-act="run"    data-name="${escHtml(s.name)}" data-tip="▶ 实时跑（mujoco.viewer.launch）">▶</button>
+          <button class="ghost iconbtn"   data-act="static" data-name="${escHtml(s.name)}" data-tip="◻ 静态查看（不步进）">◻</button>
+          <button class="ghost iconbtn"   data-act="copy"   data-path="${escHtml(xmlPath)}" data-tip="⧉ 复制 XML 路径：<br><code>${escHtml(xmlPath)}</code>">⧉</button>
+          <button class="ghost iconbtn"   data-act="mut"    data-name="${escHtml(s.name)}" data-tip="M 送入下方 mutator 区作为种子">M</button>
+          ${linkBtn}
         </td>
       </tr>`;
   }).join("");
+  const COL = TIPS.col;
   return `<table class="seeds">
     <thead><tr>
-      <th>name</th><th>source</th>
-      <th class="num">nq</th><th class="num">nv</th>
-      <th class="num">nbody</th><th class="num">ngeom</th><th class="num">nu</th>
-      <th>动作</th>
+      <th data-tip="${escHtml(COL.name||'')}">name</th>
+      <th data-tip="${escHtml(COL.source||'')}">source</th>
+      <th class="num" data-tip="${escHtml(COL.nq||'')}">nq</th>
+      <th class="num" data-tip="${escHtml(COL.nv||'')}">nv</th>
+      <th class="num" data-tip="${escHtml(COL.nbody||'')}">nbody</th>
+      <th class="num" data-tip="${escHtml(COL.ngeom||'')}">ngeom</th>
+      <th class="num" data-tip="${escHtml(COL.nu||'')}">nu</th>
+      <th data-tip="${escHtml(COL.act||'')}">动作</th>
     </tr></thead>
     <tbody>${rows}</tbody></table>`;
 }
@@ -309,8 +773,12 @@ function bindRowActions(scope) {
       document.getElementById("mut-seed").value = b.dataset.name;
       log("mutator 种子 → " + b.dataset.name);
     };
-  });
-}
+  });  scope.querySelectorAll('button[data-act="link"]').forEach(b => {
+    b.onclick = () => {
+      window.open(b.dataset.url, '_blank', 'noopener');
+      log('[link] ' + b.dataset.url);
+    };
+  });}
 
 function renderCats() {
   const q = $filter.value.trim();
@@ -323,16 +791,22 @@ function renderCats() {
     const det = document.createElement("details");
     if (isOpen) det.setAttribute("open", "");
     det.dataset.cid = c.id;
-    const ops = (c.operators || []).slice(0, 8).map(o => `<code>${escHtml(o)}</code>`).join(" · ");
-    const oracles = (c.oracles || []).slice(0, 6).map(o => `<code>${escHtml(o)}</code>`).join(" · ");
+    const ops = (c.operators || []).map(o => {
+      const tip = TIPS.op[o] || "(暂无说明)";
+      return `<span class="ops-chip" data-tip="<b>${escHtml(o)}</b><div class='tip-sep'></div>${escHtml(tip)}">${escHtml(o)}</span>`;
+    }).join("");
+    const oracles = (c.oracles || []).map(o => {
+      const tip = TIPS.or[o] || "(暂无说明)";
+      return `<span class="ops-chip" data-tip="<b>${escHtml(o)}</b><div class='tip-sep'></div>${escHtml(tip)}">${escHtml(o)}</span>`;
+    }).join("");
     det.innerHTML = `
       <summary>
         <span class="cat-id">${c.id}</span>${escHtml(c.name_zh || "")}
         <span class="cat-meta">· ${seeds.length} seeds</span>
       </summary>
       <div class="cat-desc">${escHtml(c.description || "")}</div>
-      <div class="ops"><b>operators:</b> ${ops || "(none)"}</div>
-      <div class="ops"><b>oracles:</b> ${oracles || "(none)"}</div>
+      <div class="ops-block"><span class="ops-label">Operators</span>${ops || '<span class="ops-chip">(none)</span>'}</div>
+      <div class="ops-block oracle-block"><span class="ops-label">Oracles</span>${oracles || '<span class="ops-chip">(none)</span>'}</div>
       <div class="seed-table"></div>
     `;
     det.querySelector(".seed-table").innerHTML = buildSeedTable(seeds, q);
@@ -420,9 +894,12 @@ function renderMuts() {
 $mutFilter.oninput = renderMuts;
 document.getElementById("mut-seed-clear").onclick = () => { $mutSeed.value = ""; };
 
-renderCats();
-rebuildMutDatalist();
-renderMuts();
+window.addEventListener("error", e => {
+  log("[JS ERR] " + (e.error && e.error.stack || e.message || e));
+});
+try { renderCats(); } catch (e) { log("[renderCats] " + (e.stack||e)); }
+try { rebuildMutDatalist(); } catch (e) { log("[rebuildMutDatalist] " + (e.stack||e)); }
+try { renderMuts(); } catch (e) { log("[renderMuts] " + (e.stack||e)); }
 </script>
 </body>
 </html>
@@ -461,9 +938,16 @@ class Handler(BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(parsed.query)
         if parsed.path in ("/", "/index.html"):
             state = self._state_payload(refresh=False)
+            tips = {
+                "col": COLUMN_TIPS,
+                "op":  OPERATOR_TIPS,
+                "or":  ORACLE_TIPS,
+                "src": {k: v["desc"] for k, v in SOURCE_INFO.items()},
+            }
             html = (INDEX_HTML
                     .replace("__STATE__", json.dumps(state, ensure_ascii=False))
-                    .replace("__MUTS__", json.dumps(mutator_catalog())))
+                    .replace("__MUTS__", json.dumps(mutator_catalog()))
+                    .replace("__TIPS__", json.dumps(tips, ensure_ascii=False)))
             data = html.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -512,12 +996,13 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--port", type=int, default=9100)
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=9000)
     ap.add_argument("--no-open", action="store_true")
     args = ap.parse_args()
 
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    url = f"http://127.0.0.1:{args.port}/"
+    srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    url = f"http://{args.host}:{args.port}/"
     print(f"[viz_gui2] serving {url}  (Ctrl+C to stop)")
     if not args.no_open:
         webbrowser.open(url)
