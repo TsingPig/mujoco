@@ -187,4 +187,25 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    rc = 0
+    try:
+        rc = main()
+    except SystemExit as e:
+        # SystemExit with a string message → print it then pause so the
+        # console doesn't flash-close when launched from the web GUI.
+        if isinstance(e.code, str):
+            print("\n[ERROR]", e.code, file=sys.stderr)
+            rc = 1
+        elif isinstance(e.code, int):
+            rc = e.code
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        rc = 2
+    # Pause on Windows when launched in a fresh console so user can read output.
+    if os.name == "nt" and (rc != 0 or os.environ.get("VIZ_MUT_PAUSE") == "1"):
+        try:
+            input("\n(按 Enter 关闭窗口) ")
+        except EOFError:
+            pass
+    sys.exit(rc)

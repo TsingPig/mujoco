@@ -344,6 +344,118 @@ ORACLE_TIPS: dict[str, str] = {
 }
 
 
+# ---- mutator 中文说明 + 分组（用于种子页底部"算子可视化"） ----
+MUTATOR_GROUPS: list[tuple[str, str, tuple[str, ...]]] = [
+    ("struct",   "结构 STRUCT",   ("STRUCT_GROW_LINK", "STRUCT_SHRINK", "STRUCT_DUPLICATE_SUBTREE")),
+    ("geom",     "几何 GEOM",     ("MUTATE_GEOM_SHAPE", "MUTATE_GEOM_SIZE", "MUTATE_INERTIAL",
+                                    "MUTATE_FRICTION", "MUTATE_SOLREF_SOLIMP", "MUTATE_CONTACT_MARGIN")),
+    ("joint",    "关节 JOINT",    ("MUTATE_JOINT_TYPE", "MUTATE_JOINT_LIMIT", "MUTATE_DAMPING_FRICTION")),
+    ("actuator", "驱动器 / 约束 ACTUATOR", ("ACTUATOR_ADD", "ACTUATOR_MUTATE_RANGE", "ACTUATOR_DELETE",
+                                            "EQUALITY_ADD", "TENDON_ADD")),
+    ("solver",   "求解器 SOLVER", ("MUTATE_TIMESTEP", "MUTATE_INTEGRATOR", "MUTATE_SOLVER_ITER")),
+    ("runtime",  "运行时状态 RUNTIME", ("SET_QPOS_RUNTIME", "SET_QVEL_RUNTIME", "SET_CTRL_RUNTIME")),
+]
+
+MUTATOR_TIPS: dict[str, str] = {
+    "STRUCT_GROW_LINK":         "在现有 body 树末端追加一节子 body（含 joint+geom），扩大自由度。常用来探"
+                                 "<b>触结构变化后的编译/求解稳定性</b>。",
+    "STRUCT_SHRINK":            "随机摘除一个叶子或整棵子树，缩小模型规模——验证<b>结构裁剪</b>是否仍可"
+                                 "编译并保持自洽。",
+    "STRUCT_DUPLICATE_SUBTREE": "把现有子树原地复制 N 次，制造多实例 / 多智能体场景，验证<b>命名空间冲突、"
+                                 "ID 复用</b>等问题。",
+    "MUTATE_GEOM_SHAPE":        "把 geom 的 type 改成另一种基本几何（sphere/capsule/box/cylinder/ellipsoid），"
+                                 "测试不同 type 的 size 维数与碰撞行为。",
+    "MUTATE_GEOM_SIZE":         "按强度档位放缩 geom 的 size 数组，触发 tiny/large/near_zero 等极端尺寸。",
+    "MUTATE_INERTIAL":          "改写 body 的 mass / 对角惯量，验证<b>三角不等式 / PSD / 负主轴</b>等校验。",
+    "MUTATE_JOINT_TYPE":        "在 hinge / slide / ball / free 之间互换 joint type，触发 nq/nv 维数变化。",
+    "MUTATE_JOINT_LIMIT":       "调整 joint range，覆盖 narrow / wide / inverted(lo&gt;hi) / 单点等用例。",
+    "MUTATE_DAMPING_FRICTION":  "调整 joint 的 damping / armature / frictionloss，验证阻尼 / 干摩擦数值"
+                                 "稳定性。",
+    "MUTATE_FRICTION":          "调整 geom 的 friction 三元组（sliding, torsional, rolling），覆盖光滑 / "
+                                 "高摩擦 / 负值非法等。",
+    "MUTATE_SOLREF_SOLIMP":     "调整接触 solref / solimp 的求解参数，触发不同接触刚度与脉冲响应。",
+    "MUTATE_CONTACT_MARGIN":    "调整 geom 的 contact margin / gap，影响接触检测裕量与穿透行为。",
+    "ACTUATOR_ADD":             "在现有 joint 上追加 actuator（motor / position / velocity 等），验证"
+                                 "<b>添加新驱动器</b>后控制维数与编译。",
+    "ACTUATOR_MUTATE_RANGE":    "改写 actuator 的 ctrlrange / forcerange，覆盖 narrow / wide / inverted "
+                                 "等区间。",
+    "ACTUATOR_DELETE":          "随机删除一个 actuator，缩减 nu，验证<b>控制维数减少</b>是否仍合法。",
+    "EQUALITY_ADD":             "添加 equality 约束（connect / weld / joint 等），引入额外刚性约束。",
+    "TENDON_ADD":               "添加 tendon 约束（fixed / spatial），引入耦合关节运动的张力链。",
+    "MUTATE_TIMESTEP":          "改写 option/timestep，覆盖 tiny / huge / nan_inf / negative 等离散步长。",
+    "MUTATE_INTEGRATOR":        "切换积分器（Euler / RK4 / implicit / implicitfast），验证<b>不同积分器</b>"
+                                 "下的稳定性差异。",
+    "MUTATE_SOLVER_ITER":       "改写 option/iterations 与 tolerance，触发求解器收敛 / 非收敛分支。",
+    "SET_QPOS_RUNTIME":         "<i>(runtime-only)</i> 在第 0 步前直接覆写 mjData.qpos——不改 XML，验证"
+                                 "<b>初始位形</b>越界行为。",
+    "SET_QVEL_RUNTIME":         "<i>(runtime-only)</i> 在第 0 步前覆写 mjData.qvel——验证<b>初始速度</b>"
+                                 "极端值（巨大、NaN 等）。",
+    "SET_CTRL_RUNTIME":         "<i>(runtime-only)</i> 每步注入 ctrl 信号——验证 actuator 在饱和 / NaN / "
+                                 "震荡输入下的行为。",
+}
+
+INTENSITY_TIPS: dict[str, str] = {
+    # geom size / 通用幅度
+    "tiny":                "极小档：1e-3 量级。",
+    "small":               "小档：~0.01 量级。",
+    "medium":              "中等档：~0.1 量级（常作为基线）。",
+    "large":               "大档：~0.5 量级。",
+    "huge":                "超大档：&gt;=1.0，常会触发数值警告。",
+    "near_zero":           "接近 0 但 &gt; mjMINVAL：编译通过、运行时风险高。",
+    # inertial
+    "near_zero_mass":      "质量接近 0：易触发 1/m 爆炸。",
+    "small_mass":          "小质量。",
+    "default_mass":        "缺省质量 1.0。",
+    "huge_mass":           "巨大质量：1e3 量级。",
+    "near_zero_inertia":   "惯量接近 0：易触发 1/I 爆炸。",
+    "anisotropic":         "各向异性主轴（满足三角不等式）。",
+    "negative_principal":  "<b>非法</b>：负主轴惯量，编译应当报错。",
+    # joint
+    "narrow":              "极窄区间：[-0.05, 0.05]。",
+    "wide":                "大范围：约 [-π, π]。",
+    "inverted":            "<b>非法</b>：lo &gt; hi。",
+    "singular_zero_range": "<b>非法</b>：零宽度区间（lo == hi）。",
+    # solver / numeric
+    "negative":            "<b>非法</b>：负数（应被 schema 拒绝）。",
+    "zero":                "0 值：边界条件。",
+    "nan_inf":             "<b>非法</b>：NaN / ±Inf。",
+    "extreme":             "极端档：超过常规 1~2 个数量级。",
+    # integrator
+    "euler":               "Euler 积分器（缺省）。",
+    "rk4":                 "RK4 四阶积分器：较准但较慢。",
+    "implicit":            "Implicit 积分器：刚性系统更稳定。",
+    "implicitfast":        "Implicit-fast 变体：implicit 的近似版本。",
+    # geom shape
+    "sphere":              "球体：size 维数 = 1。",
+    "capsule":             "胶囊：size 维数 = 2（半径、半长）。",
+    "box":                 "盒子：size 维数 = 3（半边长）。",
+    "cylinder":            "圆柱：size 维数 = 2。",
+    "ellipsoid":           "椭球：size 维数 = 3。",
+    # joint type
+    "hinge":               "铰链关节：1 自由度旋转。",
+    "slide":               "滑动关节：1 自由度平移。",
+    "ball":                "球关节：3 自由度旋转（四元数表示）。",
+    "free":                "自由关节：6 自由度（位置 + 四元数）。",
+    # struct
+    "leaf_only":           "仅删除叶子 body。",
+    "random_subtree":      "随机选一棵子树整体删除。",
+    "single":              "复制 1 份。",
+    "chain_x3":            "复制 3 份（链式）。",
+    "chain_x10":           "复制 10 份。",
+    "simple_pendulum":     "追加一节单摆。",
+    "compound_arm":        "追加一节复合臂。",
+    "cluster_balls":       "追加一团球。",
+    "_default":            "无强度档（mutator 不接受 intensity 参数）。",
+}
+
+
+def _mutator_group(mid: str) -> tuple[str, str]:
+    for gid, gname, ids in MUTATOR_GROUPS:
+        if mid in ids:
+            return gid, gname
+    return "other", "其他 OTHER"
+
+
 def _seed_kind(name: str, source: str) -> str:
     """对 seed 名称做启发式归类，返回 1 句中文模型类型说明。"""
     n = name.lower()
@@ -464,9 +576,12 @@ def mutator_catalog() -> list[dict]:
         m = MUTATORS[mid]
         legal = [x for x in m.intensity_modes if x not in m.invalid_parseable_modes]
         invalid = list(m.invalid_parseable_modes)
+        gid, gname = _mutator_group(mid)
         out.append({
             "id": mid, "runtime_only": bool(getattr(m, "runtime_only", False)),
             "legal": legal, "invalid": invalid,
+            "group_id": gid, "group_name": gname,
+            "tip": MUTATOR_TIPS.get(mid, ""),
         })
     return out
 
@@ -578,6 +693,47 @@ INDEX_HTML = """<!doctype html>
   .ops-chip[data-tip] { cursor: help; }
   table.seeds th[data-tip]    { border-bottom-style: dashed; }
   table.seeds tr[data-tip] td:first-child { position: relative; }
+
+  /* ---- mutator 可视化 v2 ---- */
+  .mut-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+                 padding: 8px 10px; background: #2563eb0a; border-radius: 8px;
+                 border: 1px solid #2563eb33; margin-bottom: 10px; }
+  .mut-toolbar label { font-size: 12px; color: #555; }
+  .mut-seed-card { display: inline-flex; align-items: center; gap: 8px;
+                   padding: 4px 10px; border-radius: 6px;
+                   background: #16a34a18; border: 1px solid #16a34a55;
+                   font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+                   color: #15803d; min-height: 22px; }
+  .mut-seed-card.empty { background: #8881; color: #888; border-color: #8884; }
+  .mut-group { margin-bottom: 12px; border: 1px solid #8883; border-radius: 8px;
+               background: #ffffff04; }
+  .mut-group > .mut-group-h { padding: 8px 12px; font-weight: 600; font-size: 13px;
+                              border-bottom: 1px solid #8882;
+                              display: flex; align-items: center; gap: 8px;
+                              background: linear-gradient(90deg, #2563eb12, transparent); }
+  .mut-group .mut-group-h .pill { background: #2563eb22; color: #2563eb; }
+  .mut-group-body { display: grid; gap: 10px; padding: 10px;
+                    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .mut-card  { border: 1px solid #8884; border-radius: 8px; padding: 8px 10px;
+               background: #ffffff08; display: flex; flex-direction: column; gap: 6px; }
+  .mut-card-h { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .mut-id    { font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+               font-weight: 700; color: #2563eb; cursor: help;
+               border-bottom: 1px dashed #2563eb88; }
+  .mut-runtime-pill { background: #f59e0b22; color: #b45309;
+                      font-size: 10px; padding: 1px 6px; border-radius: 999px; }
+  .mut-row   { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+  .mut-row-label { font-size: 10px; font-weight: 700; color: #888;
+                   text-transform: uppercase; letter-spacing: .04em; min-width: 52px; }
+  .intens-chip { font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+                 padding: 2px 8px; border-radius: 999px; cursor: pointer;
+                 border: 1px solid #2563eb55; background: #2563eb14; color: #2563eb;
+                 user-select: none; }
+  .intens-chip:hover { background: #2563eb; color: white; }
+  .intens-chip.invalid { border-color: #dc262655; background: #dc262614; color: #dc2626; }
+  .intens-chip.invalid:hover { background: #dc2626; color: white; }
+  .intens-chip.all   { border-style: dashed; }
+  .mut-empty { color: #aaa; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -611,17 +767,21 @@ INDEX_HTML = """<!doctype html>
 </div>
 
 <div class="card">
-  <details>
-    <summary>② Mutator 前后对比（与 viz_gui v1 一致）</summary>
-    <div class="toolbar" style="margin-top:8px">
+  <details open>
+    <summary>② Operator 算子可视化（点击 intensity 即跑 Before/After 对比）</summary>
+    <div class="mut-toolbar">
       <label>种子：</label>
-      <input type="text" id="mut-seed" list="mut-seed-list" placeholder="输入名字或留空" style="min-width:340px"/>
+      <input type="text" id="mut-seed" list="mut-seed-list" placeholder="可输入或从上方 M 按钮选" style="min-width:280px"/>
       <datalist id="mut-seed-list"></datalist>
-      <button class="ghost" id="mut-seed-clear">✕</button>
-      <label><input type="checkbox" id="mut-no-before"/> 跳过 BEFORE</label>
-      <input type="text" id="mut-filter" placeholder="过滤 mutator..." style="min-width:180px"/>
+      <button class="ghost iconbtn" id="mut-seed-clear" data-tip="清空已选种子">✕</button>
+      <span id="mut-seed-info" class="mut-seed-card empty">尚未选择种子（可留空，使用 mutator 默认 seed）</span>
+      <span style="flex:1"></span>
+      <label data-tip="勾选后只跑 AFTER 单视图，跳过 BEFORE 对照">
+        <input type="checkbox" id="mut-no-before"/> 跳过 BEFORE
+      </label>
+      <input type="text" id="mut-filter" placeholder="过滤 mutator id..." style="min-width:200px"/>
     </div>
-    <div id="muts" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px"></div>
+    <div id="muts"></div>
   </details>
 </div>
 
@@ -772,6 +932,9 @@ function bindRowActions(scope) {
     b.onclick = () => {
       document.getElementById("mut-seed").value = b.dataset.name;
       log("mutator 种子 → " + b.dataset.name);
+      try { refreshSeedInfo(); } catch (e) {}
+      const m = document.getElementById("muts");
+      if (m) m.scrollIntoView({behavior:"smooth", block:"start"});
     };
   });  scope.querySelectorAll('button[data-act="link"]').forEach(b => {
     b.onclick = () => {
@@ -850,6 +1013,8 @@ document.getElementById("refresh").onclick = async () => {
 const $muts = document.getElementById("muts");
 const $mutFilter = document.getElementById("mut-filter");
 const $mutSeed = document.getElementById("mut-seed");
+const $mutSeedInfo = document.getElementById("mut-seed-info");
+
 function rebuildMutDatalist() {
   const list = document.getElementById("mut-seed-list");
   list.innerHTML = "";
@@ -859,40 +1024,136 @@ function rebuildMutDatalist() {
     list.appendChild(o);
   });
 }
+
+function _byName(name) {
+  if (!name) return null;
+  for (const m of STATE.manifest) if (m.name === name) return m;
+  return null;
+}
+function refreshSeedInfo() {
+  const v = $mutSeed.value.trim();
+  const m = _byName(v);
+  if (!v) {
+    $mutSeedInfo.className = "mut-seed-card empty";
+    $mutSeedInfo.textContent = "尚未选择种子（可留空，使用 mutator 默认 seed）";
+  } else if (m) {
+    $mutSeedInfo.className = "mut-seed-card";
+    $mutSeedInfo.innerHTML = `✓ <b>${escHtml(m.name)}</b>
+      <span class='tip-dim'>[${escHtml(m.source||'?')}]</span>
+      nq=${m.nq ?? '?'} · nv=${m.nv ?? '?'} · nbody=${m.nbody ?? '?'} · ngeom=${m.ngeom ?? '?'} · nu=${m.nu ?? '?'}`;
+    $mutSeedInfo.setAttribute("data-tip", m.tip_html || ("<b>" + escHtml(m.name) + "</b>"));
+  } else {
+    $mutSeedInfo.className = "mut-seed-card empty";
+    $mutSeedInfo.textContent = "⚠ 该名字未在 manifest 中找到";
+    $mutSeedInfo.removeAttribute("data-tip");
+  }
+}
+
+function _runMut(mid, intensity) {
+  launch({
+    tool: "mutator", mutator: mid,
+    seed: $mutSeed.value.trim() || null,
+    intensity: intensity || null,
+    no_before: document.getElementById("mut-no-before").checked,
+  });
+}
+
+function _intensTip(mode) {
+  const t = TIPS.intens[mode];
+  return `<b>${escHtml(mode)}</b><div class='tip-sep'></div>${t || "(暂无说明)"}<div class='tip-sep'></div><span class='tip-dim'>点击 = 立即跑此强度的 Before/After</span>`;
+}
+
 function renderMuts() {
   const filt = $mutFilter.value.trim().toLowerCase();
   $muts.innerHTML = "";
+  // 按组归并
+  const groups = {};
   MUTS.forEach(m => {
     if (filt && !m.id.toLowerCase().includes(filt)) return;
-    const card = document.createElement("div");
-    card.style = "border:1px solid #8883;border-radius:6px;padding:6px 10px";
-    const tag = m.runtime_only ? '<span class="pill cnt">runtime-only</span>' : '';
-    const opts = ['<option value="">(全部合法强度)</option>',
-                  ...m.legal.map(x => `<option value="${x}">${x}</option>`)].join("");
-    card.innerHTML = `
-      <div style="font-family:ui-monospace,Consolas,monospace;font-size:12px;font-weight:600">
-        ${m.id} ${tag}
-      </div>
-      <div style="font-size:10px;color:#888;margin:2px 0 4px 0">
-        legal: ${m.legal.join(", ") || "(none)"}
-      </div>
-      <div class="toolbar" style="margin:0">
-        <select>${opts}</select>
-        <button class="primary iconbtn">▶ Before/After</button>
-      </div>
-    `;
-    const sel = card.querySelector("select");
-    card.querySelector("button").onclick = () => launch({
-      tool: "mutator", mutator: m.id,
-      seed: $mutSeed.value || null,
-      intensity: sel.value || null,
-      no_before: document.getElementById("mut-no-before").checked,
-    });
-    $muts.appendChild(card);
+    const gid = m.group_id || "other";
+    (groups[gid] = groups[gid] || {name: m.group_name || "其他", items: []}).items.push(m);
   });
+  // 保持声明顺序
+  const order = ["struct","geom","joint","actuator","solver","runtime","other"];
+  let total = 0;
+  order.forEach(gid => {
+    const g = groups[gid]; if (!g) return;
+    total += g.items.length;
+    const sec = document.createElement("div");
+    sec.className = "mut-group";
+    const head = document.createElement("div");
+    head.className = "mut-group-h";
+    head.innerHTML = `<span>${escHtml(g.name)}</span>
+      <span class="pill cnt">${g.items.length} mutator</span>`;
+    sec.appendChild(head);
+    const body = document.createElement("div");
+    body.className = "mut-group-body";
+    g.items.forEach(m => body.appendChild(_renderMutCard(m)));
+    sec.appendChild(body);
+    $muts.appendChild(sec);
+  });
+  if (!total) {
+    $muts.innerHTML = '<div class="mut-empty" style="padding:12px">(过滤后无匹配 mutator)</div>';
+  }
 }
+
+function _renderMutCard(m) {
+  const card = document.createElement("div");
+  card.className = "mut-card";
+  const tip = TIPS.mut[m.id] || "(暂无说明)";
+  const runPill = m.runtime_only
+    ? `<span class="mut-runtime-pill" data-tip="runtime-only：不改 XML，只在运行期注入指令（qpos/qvel/ctrl）">runtime-only</span>` : "";
+  // 头部
+  const head = document.createElement("div");
+  head.className = "mut-card-h";
+  head.innerHTML = `<span class="mut-id" data-tip="<b>${escHtml(m.id)}</b><div class='tip-sep'></div>${tip}">${escHtml(m.id)}</span>${runPill}`;
+  card.appendChild(head);
+  // 合法 intensity 行
+  const legalRow = document.createElement("div");
+  legalRow.className = "mut-row";
+  legalRow.innerHTML = `<span class="mut-row-label" data-tip="点击任一 intensity 立即跑 Before/After">合法</span>`;
+  // "全部" 快捷
+  const all = document.createElement("span");
+  all.className = "intens-chip all";
+  all.textContent = "▶ 全部合法";
+  all.setAttribute("data-tip", "<b>不指定 intensity</b><div class='tip-sep'></div>由 mutator 自行随机选一个合法档位<div class='tip-sep'></div><span class='tip-dim'>点击 = 跑 Before/After</span>");
+  all.onclick = () => _runMut(m.id, null);
+  legalRow.appendChild(all);
+  if (!m.legal.length) {
+    const e = document.createElement("span"); e.className = "mut-empty"; e.textContent = "(无 intensity 档位)";
+    legalRow.appendChild(e);
+  }
+  m.legal.forEach(mode => {
+    const c = document.createElement("span");
+    c.className = "intens-chip";
+    c.textContent = mode;
+    c.setAttribute("data-tip", _intensTip(mode));
+    c.onclick = () => _runMut(m.id, mode);
+    legalRow.appendChild(c);
+  });
+  card.appendChild(legalRow);
+  // invalid 行（如有）
+  if (m.invalid && m.invalid.length) {
+    const invRow = document.createElement("div");
+    invRow.className = "mut-row";
+    invRow.innerHTML = `<span class="mut-row-label" data-tip="故意非法的 intensity（CI 跳过；点击仍可手动跑以观察 MuJoCo 的拒绝/警告）">非法</span>`;
+    m.invalid.forEach(mode => {
+      const c = document.createElement("span");
+      c.className = "intens-chip invalid";
+      c.textContent = mode;
+      c.setAttribute("data-tip", _intensTip(mode));
+      c.onclick = () => _runMut(m.id, mode);
+      invRow.appendChild(c);
+    });
+    card.appendChild(invRow);
+  }
+  return card;
+}
+
 $mutFilter.oninput = renderMuts;
-document.getElementById("mut-seed-clear").onclick = () => { $mutSeed.value = ""; };
+$mutSeed.oninput = refreshSeedInfo;
+$mutSeed.onchange = refreshSeedInfo;
+document.getElementById("mut-seed-clear").onclick = () => { $mutSeed.value = ""; refreshSeedInfo(); };
 
 window.addEventListener("error", e => {
   log("[JS ERR] " + (e.error && e.error.stack || e.message || e));
@@ -900,6 +1161,7 @@ window.addEventListener("error", e => {
 try { renderCats(); } catch (e) { log("[renderCats] " + (e.stack||e)); }
 try { rebuildMutDatalist(); } catch (e) { log("[rebuildMutDatalist] " + (e.stack||e)); }
 try { renderMuts(); } catch (e) { log("[renderMuts] " + (e.stack||e)); }
+try { refreshSeedInfo(); } catch (e) { log("[refreshSeedInfo] " + (e.stack||e)); }
 </script>
 </body>
 </html>
@@ -943,6 +1205,8 @@ class Handler(BaseHTTPRequestHandler):
                 "op":  OPERATOR_TIPS,
                 "or":  ORACLE_TIPS,
                 "src": {k: v["desc"] for k, v in SOURCE_INFO.items()},
+                "mut": MUTATOR_TIPS,
+                "intens": INTENSITY_TIPS,
             }
             html = (INDEX_HTML
                     .replace("__STATE__", json.dumps(state, ensure_ascii=False))
