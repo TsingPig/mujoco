@@ -2,14 +2,39 @@ seeds:
   curated_dir: seeds/curated
   quarantine_dir: seeds/_quarantine
   pattern: "*.xml"
+  # Bias caps toward high-complexity sources (real robots, multi-agent scenes).
+  # Rationale: small upstream `mujoco/model/` is mostly toy demos; menagerie /
+  # mujoco_mpc / dm_control / robosuite have realistic nq=30~60 robots and
+  # multi-object arenas where mutators are far more likely to surface bugs.
+  # Caps now bound the *actor* count per source. Non-actor scenes/objects
+  # (cabinets, food, fixtures, arenas) are auto-routed to seeds/_assets/
+  # regardless of cap. Caps were raised significantly to absorb the actor
+  # surplus previously rotting in seeds/_pool.
   per_source_cap:
-    mujoco: 10
-    menagerie: 20
-    dm_control: 15
-    gym_robotics: 8
-    mujoco_mpc: 4
-    robosuite: 2
-    mjx: 1
+    mujoco: 12
+    menagerie: 200         # whole-robot xmls + scene*.xml across all robots
+    dm_control: 40         # walkers + soccer + manipulation + entities
+    gym_robotics: 20
+    mujoco_mpc: 30         # quadruped/humanoid/manipulation tasks
+    robosuite: 30          # robots + grippers + multi-arm scenes
+    mjx: 30                # mjx test_data humanoids 03..10 + shadow hand
+    robocasa: 12           # most robocasa is fixtures -> _assets
+    libero: 8              # libero is mostly objects/scenes -> _assets
+    mimicgen: 8
+    safety_gymnasium: 16   # Car/Point/Doggo + level variants
+    myosuite: 30           # musculoskeletal hand/arm/leg variants
+    mujoco_playground: 20  # dm_control_suite standalone subset
+  # Per-source patterns/preferences (extra hints; consumed by fetch_seeds.py).
+  prefer_keywords:
+    menagerie: ["scene", "humanoid", "shadow_hand", "anymal", "spot", "go2",
+                "franka", "ur5e", "kinova"]
+    dm_control: ["soccer", "humanoid_CMU", "dog", "rodent"]
+    mujoco_mpc: ["quadruped", "humanoid", "manipulation", "panda"]
+    robosuite: ["multi", "two_arm", "bins", "pegs"]
+    robocasa: ["kitchen", "stove", "sink", "microwave", "fridge"]
+    libero: ["kitchen", "study", "living"]
+    mimicgen: ["coffee", "stack", "threading", "square"]
+    myosuite: ["hand", "arm", "leg", "elbow"]
 
 mutators:
   # Order = canonical action index for downstream RL
