@@ -1,0 +1,579 @@
+# seeds2 / categories.yaml
+#
+# Declarative classification of curated MJCF seeds into the 12 MuJoCo-ecosystem
+# bug categories defined in `_docs/mujoco_bug_taxonomy_seed_operator_oracle.md`.
+#
+# A seed (a directory under `seeds/curated/` or `seeds/_assets/`) belongs to a
+# category iff (after lower-casing its directory name):
+#   * the name matches ANY pattern in `name_match`, OR
+#   * the seed's source token is in `sources`,           AND
+#   * the name does NOT match any pattern in `name_exclude`.
+#
+# `explicit` always wins (forces inclusion). `name_match` / `name_exclude` are
+# Python re.IGNORECASE patterns applied to the directory name (e.g. the string
+# `menagerie__unitree_g1_g1`).
+#
+# `attach_assets` lists asset-pool families this category can pull as
+# manipulation targets / scene fixtures for L3 composition operators.
+#
+# Document references: every category links to the doc section it implements.
+# fields:
+#   id           : Cn category id
+#   name_zh      : 中文标题
+#   description  : English one-liner reused as tooltip
+#   doc_anchor   : section header in the taxonomy doc
+#   operators    : suggested mutator / runtime operator subset (informational)
+#   oracles      : oracle names (informational, populated by triage modules)
+#   sources      : seed sources allowed in this category (informational filter)
+#   name_match   : regex patterns; a seed dir name matching any becomes a member
+#   name_exclude : regex patterns; if matched, seed is dropped from this cat
+#   explicit     : explicit seed dir names ALWAYS included (overrides exclude)
+#   attach_assets: regex over seeds/_assets/ dir names that this category can
+#                  pull as manipulation targets / scene fixtures
+#
+
+categories:
+
+  - id: C1
+    name_zh: "MJCF 加载 / schema / include / asset 引用"
+    description: "Loader fails or differs across parsers/versions; many-mesh / nested-include / missing-asset stress."
+    doc_anchor: "C1. MJCF 加载 / schema / include / asset 引用类"
+    operators:
+      - file_existence_scan
+      - meshdir_texturedir_mutation
+      - include_path_rewrite
+      - autolimits_toggle
+      - urdf_mjcf_roundtrip
+      - pymjcf_native_diff_load
+      - version_matrix_compile
+    oracles:
+      - from_xml_path_success
+      - schema_violation_class
+      - native_vs_pymjcf_consistency
+      - cross_version_compile_consistency
+      - asset_reachability
+    sources: [menagerie, dm_control, gym_robotics, myosuite, mujoco]
+    name_match:
+      - "booster_t1"
+      - "ufactory_lite6"
+      - "unitree_g1"
+      - "robotiq_2f85_v4"
+      - "myoelbow"
+      - "myoarm"
+      - "myoleg"
+      - "fruitfly"
+      - "rodent"
+      - "humanoid_cmu"
+      - "dog"               # dm_control dog has 100+ meshes
+      - "tiago"
+      - "talos"
+      - "apollo"
+      - "berkeley_humanoid"
+      - "g1_with_hands"
+      - "shadow_hand"
+      - "shadow_dexee"
+      - "boxhead"           # dm_control soccer rich-asset
+    name_exclude:
+      - "_scene$"           # bare scene XMLs are loader-trivial
+    attach_assets:
+      - "_articulated_objects_"
+      - "_fixtures_"
+      - "shapenet"
+      - "_objects_"
+
+  - id: C2
+    name_zh: "启动稳定性 / 默认控制器发散"
+    description: "Loads OK but zero / home / small ctrl rollout drifts, oscillates or NaNs."
+    doc_anchor: "C2. 启动稳定性 / 默认控制器发散类"
+    operators:
+      - zero_control_rollout
+      - home_keyframe_reset
+      - small_ctrl_pulse
+      - single_joint_target_sweep
+      - kp_kd_sweep
+      - damping_armature_scale
+      - timestep_integrator_sweep
+      - solver_iter_sweep
+      - contact_exclusion_toggle
+    oracles:
+      - qpos_qvel_qacc_finite
+      - base_height_drop
+      - com_drift
+      - oscillation_amplitude
+      - contact_force_spike
+      - kinetic_energy_spike
+    sources: [menagerie, dm_control, gym_robotics, mjx, mujoco_playground]
+    name_match:
+      - "booster_t1"
+      - "kinova_gen3"
+      - "unitree_go1"
+      - "unitree_go2"
+      - "unitree_h1"
+      - "unitree_g1"
+      - "unitree_a1"
+      - "agility_cassie"
+      - "talos"
+      - "apollo"
+      - "berkeley_humanoid"
+      - "fourier_n1"
+      - "tiago"
+      - "spot"
+      - "anymal"
+      - "barkour"
+      - "franka_emika_panda"
+      - "kuka_iiwa"
+      - "ur5e"
+      - "ur10e"
+      - "humanoid"
+      - "walker"
+      - "quadruped"
+      - "cheetah"
+      - "hopper"
+      - "ant"
+      - "robotis_op3"
+      - "toddlerbot"
+      - "mjx_humanoid"
+    name_exclude:
+      - "_scene$"
+      - "_hand$"
+      - "_gripper$"
+
+  - id: C3
+    name_zh: "质量 / 惯量 / COM / mass matrix"
+    description: "Mass, inertia, inertial frame, left-right symmetry or assembled mass-matrix unphysical."
+    doc_anchor: "C3. 质量 / 惯量 / COM / mass matrix 类"
+    operators:
+      - mass_scale
+      - diaginertia_scale
+      - inertial_pos_quat_perturb
+      - left_right_mirror_compare
+      - off_center_impulse
+      - small_torque
+      - base_push
+      - mass_matrix_readback
+      - inverse_dynamics_compare
+    oracles:
+      - mass_bbox_inertia_plausibility
+      - radius_of_gyration
+      - com_vs_mesh_centroid
+      - left_right_param_consistency
+      - mass_matrix_finite_psd
+      - small_perturb_response
+      - param_patch_diff
+    sources: [menagerie, robosuite, myosuite]
+    name_match:
+      - "stanford_tidybot"
+      - "robotiq_2f85"
+      - "talos"
+      - "leap_hand"
+      - "shadow_dexee"
+      - "shadow_hand"
+      - "wonik_allegro"
+      - "franka_emika_panda"
+      - "kuka_iiwa"
+      - "robosuite__.*panda"
+      - "robosuite__.*null"
+      - "myoarm"
+      - "myoleg"
+      - "myoelbow"
+      - "humanoid"
+      - "humanoid_cmu"
+      - "berkeley_humanoid"
+      - "apollo"
+      - "g1"
+      - "h1"
+      - "n1"
+    name_exclude: []
+
+  - id: C4
+    name_zh: "碰撞 / 接触几何 / 穿透 / contact force"
+    description: "Collision geom, contact list, penetration depth, contact force, contact-sensor backend inconsistencies."
+    doc_anchor: "C4. 碰撞 / 接触几何 / 穿透 / contact force 类"
+    operators:
+      - collision_geom_mutation
+      - visual_collision_aabb_compare
+      - floor_table_object_pose_mutation
+      - contact_margin_friction_solref_solimp_mutation
+      - gravity_toggle
+      - contact_rich_state_reset
+      - mjx_classic_diff
+      - cylinder_plane_boundary_sweep
+    oracles:
+      - unexpected_initial_contact
+      - penetration_depth
+      - contact_pair_consistency
+      - contact_force_magnitude
+      - floor_tunneling
+      - self_intersection
+      - mjx_vs_classic_contact_diff
+      - contact_sensor_consistency
+    sources: [menagerie, gym_robotics, robosuite, mjx, mujoco_mpc, dm_control]
+    name_match:
+      - "ur10e"
+      - "ur5e"
+      - "robotiq_2f85"
+      - "kinova_gen3"
+      - "pusher"
+      - "ant"
+      - "humanoid"
+      - "inverted_double_pendulum"
+      - "quadruped"
+      - "robosuite__.*lift"
+      - "robosuite__.*pick"
+      - "fetch_pick_and_place"
+      - "fetch_push"
+      - "hand_manipulate"
+      - "adroit"
+      - "mjx__.*humanoid"
+      - "mjx__.*shadow"
+      - "cartpole"
+      - "single_cube"
+    name_exclude: []
+    attach_assets:
+      - "_articulated_objects_"
+      - "stable_hope_objects"
+      - "shapenet"
+
+  - id: C5
+    name_zh: "执行器 / 控制范围 / gear / 力方向 / tracking"
+    description: "Actuator targets, ctrlrange, gear sign / magnitude, muscle / inverse dynamics tracking inconsistencies."
+    doc_anchor: "C5. 执行器 / 控制范围 / gear / force direction / tracking 类"
+    operators:
+      - ctrlrange_mutation
+      - joint_range_mutation
+      - single_actuator_sweep
+      - target_qpos_replay
+      - gear_sign_flip
+      - gear_magnitude_scale
+      - kp_kd_sweep
+      - actuator_force_perturb
+      - inv_dyn_ctrl_reconstruction
+      - hold_stationary
+    oracles:
+      - target_vs_actual_steady_state
+      - end_effector_pose_error
+      - overshoot_settling
+      - actuator_axis_isolation
+      - drone_yaw_roll_pitch_torque_balance
+      - qfrc_actuator_inv_dyn_residual
+      - zero_target_drift
+    sources: [menagerie, myosuite, robosuite, mujoco_playground]
+    name_match:
+      - "flexiv_rizon4"
+      - "kuka_iiwa"
+      - "leap_hand"
+      - "skydio"
+      - "shadow_dexee"
+      - "shadow_hand"
+      - "wonik_allegro"
+      - "franka_emika_panda"
+      - "ur5e"
+      - "ur10e"
+      - "myoelbow"
+      - "myoarm"
+      - "myoleg"
+      - "myo_finger"
+      - "robosuite__.*panda"
+      - "robosuite__.*ur5e"
+      - "robosuite__.*kinova"
+      - "robosuite__.*iiwa"
+      - "trs_so_arm"
+      - "ufactory_xarm7"
+      - "ufactory_lite6"
+      - "agilex_piper"
+      - "trossen"
+      - "umi_gripper"
+      - "panda_gripper"
+      - "robotiq_gripper"
+      - "rethink_gripper"
+      - "spot_arm"
+    name_exclude: []
+
+  - id: C6
+    name_zh: "状态 reset / reproducibility / warm-start / clone"
+    description: "Same seed/state/action diverges; set_state breaks contact; mocap weld reset misbehaves."
+    doc_anchor: "C6. 状态 reset / reproducibility / warm-start / clone 类"
+    operators:
+      - same_seed_repeated_reset
+      - same_action_replay
+      - warm_start_toggle
+      - get_set_state_replay
+      - contact_rich_state_capture
+      - mocap_weld_reset
+      - deepcopy_clone
+      - hard_reset_toggle
+    oracles:
+      - obs_trajectory_equality
+      - initial_state_equality
+      - object_teleport_after_set_state
+      - penetration_after_set_state
+      - mocap_pose_residual
+      - state_space_key_consistency
+      - cloned_env_divergence
+    sources: [gym_robotics, dm_control, robosuite, mujoco_mpc]
+    name_match:
+      - "fetch_pick_and_place"
+      - "fetch_push"
+      - "fetch_reach"
+      - "fetch_slide"
+      - "hand_manipulate_block"
+      - "hand_manipulate_egg"
+      - "hand_manipulate_pen"
+      - "hand_reach"
+      - "adroit"
+      - "stacker"
+      - "manipulator"
+      - "robosuite__.*lift"
+      - "robosuite__.*pick"
+      - "robosuite__.*stack"
+    name_exclude: []
+
+  - id: C7
+    name_zh: "传感器 / 观测 / info / reward 语义"
+    description: "Simulation OK but observation / info / reward / sensor disagrees with model state or docs."
+    doc_anchor: "C7. 传感器 / 观测 / info / reward 语义类"
+    operators:
+      - info_obs_consistency
+      - reward_pre_post_diff
+      - healthy_range_sweep
+      - sensor_force_perturb
+      - fk_recompute
+      - obs_shape_mutation
+      - custom_site_body_inject
+      - docs_api_param_scan
+    oracles:
+      - info_pos_eq_xpos
+      - reward_component_identity
+      - reward_timing_post_transition
+      - constant_observation_detector
+      - sensor_acc_residual
+      - fk_sensor_residual
+      - obs_schema
+      - documented_arg_effective
+    sources: [gym_robotics, dm_control, robosuite, mujoco_playground]
+    name_match:
+      - "ant"
+      - "humanoid"
+      - "humanoidstandup"
+      - "reacher"
+      - "pusher"
+      - "inverted_double_pendulum"
+      - "swimmer"
+      - "half_cheetah"
+      - "fetch_pick_and_place"
+      - "fetch_reach"
+      - "robosuite__.*panda"
+      - "robosuite__.*gripper"
+      - "manipulator"
+      - "stacker"
+    name_exclude: []
+
+  - id: C8
+    name_zh: "渲染 / 相机 / headless / vectorized"
+    description: "Offscreen render, GL backend, RecordVideo, multi-cam buffer, deformable / skin rendering bugs."
+    doc_anchor: "C8. 渲染 / 相机 / headless / vectorized rendering 类"
+    operators:
+      - gl_backend_switch
+      - same_state_multi_render
+      - record_video_wrapper
+      - multi_episode_render_context
+      - sync_vector_env_render
+      - multi_camera
+      - import_context_pollution
+      - deformable_skin_render
+      - python_version_matrix
+      - gpu_device_select
+    oracles:
+      - framebuffer_completeness
+      - black_frame
+      - pixel_hash_determinism
+      - image_flip
+      - cross_env_frame_contamination
+      - segfault
+      - render_exception_class
+      - camera_frame_schema
+    sources: [dm_control, gym_robotics, robosuite, mujoco_playground]
+    name_match:
+      - "humanoid"
+      - "half_cheetah"
+      - "ant"
+      - "fetch_slide"
+      - "robosuite__.*lift"
+      - "robosuite__.*pick"
+      - "robosuite__.*wipe"
+      - "robosuite__.*sawyer"
+      - "myoarm"
+      - "myoleg"
+      - "stacker"
+      - "manipulator"
+      - "boxhead"
+    name_exclude: []
+
+  - id: C9
+    name_zh: "MJX / backend differential / plugin / action dim"
+    description: "Same model differs across classic / MJX / Brax / madrona-mjx / wrappers in dim / contact / sensor / state / plugin."
+    doc_anchor: "C9. MJX / backend differential / plugin / action dimension 类"
+    operators:
+      - classic_vs_mjx_diff
+      - plugin_toggle
+      - actdim_action_mutation
+      - batched_vmap_action
+      - eq_active_toggle
+      - contact_pair_generation
+      - sensor_readback
+      - mjx_state_get_put
+      - renderer_randomization_mutation
+    oracles:
+      - action_space_consistency
+      - state_trajectory_residual
+      - contact_count_force_diff
+      - sensor_backend_residual
+      - shape_mismatch
+      - plugin_recognition
+      - same_seed_backend_divergence
+    sources: [mjx, menagerie, mujoco, mujoco_playground]
+    name_match:
+      - "^mjx__"
+      - "_mjx_"
+      - "_mjx$"
+      - "shadow_dexee"
+      - "robotiq_2f85"
+      - "humanoid"
+      - "cartpole"
+      - "plugin_actuator_pid"
+      - "barkour_v0_mjx"
+      - "go2_mjx"
+      - "g1_mjx"
+      - "anymal_c_mjx"
+    name_exclude: []
+
+  - id: C10
+    name_zh: "JAX/MJX 可微 / GPU 数值 / 精度"
+    description: "GPU batched / differentiable training: gradient, jacobian, XLA / cusolver, precision NaN / hard-error."
+    doc_anchor: "C10. JAX/MJX differentiability / GPU numerical / precision 类"
+    operators:
+      - jax_grad_jac
+      - contact_boundary_sweep
+      - solver_switch
+      - x64_toggle
+      - batch_size_sweep
+      - cuda_jax_version_matrix
+      - ppo_smoke
+      - seed_sweep
+    oracles:
+      - gradient_finite
+      - jacobian_finite
+      - xla_runtime_error
+      - precision_mismatch
+      - training_abort
+      - cpu_gpu_diff
+    sources: [mjx, mujoco, mujoco_playground]
+    name_match:
+      - "^mjx__"
+      - "_mjx_"
+      - "_mjx$"
+      - "humanoid"
+      - "cheetah"
+      - "walker"
+      - "cartpole"
+      - "ball"
+      - "plane"
+    name_exclude: []
+
+  - id: C11
+    name_zh: "任务级组合 / grasp / attach / manipulation"
+    description: "arm + gripper + object + table composition: grasp failure, finger tilt, gripper collapse, attach pose error."
+    doc_anchor: "C11. 任务级组合 / grasp / attachment / manipulation 类"
+    operators:
+      - attach_site_mutation
+      - mount_pose_mutation
+      - object_mass_size_friction_mutation
+      - reach_close_lift_seq
+      - gripper_force_sweep
+      - finger_actuator_sweep
+      - controller_switch
+      - table_floor_pose_mutation
+      - integrator_switch
+      - task_reset_mutation
+    oracles:
+      - grasp_success
+      - object_slip
+      - finger_symmetry
+      - gripper_collapse
+      - contact_stability
+      - unexpected_arm_motion
+      - task_metric_regression
+    sources: [menagerie, robosuite, gym_robotics, mimicgen, libero, robocasa]
+    name_match:
+      - "single_cube"
+      - "robotiq_2f85"
+      - "panda_gripper"
+      - "rethink_gripper"
+      - "robotiq_gripper"
+      - "spot_arm"
+      - "robosuite__.*lift"
+      - "robosuite__.*pick"
+      - "robosuite__.*stack"
+      - "robosuite__.*nut"
+      - "robosuite__.*door"
+      - "robosuite__.*wipe"
+      - "robosuite__.*tool"
+      - "fetch_pick_and_place"
+      - "fetch_push"
+      - "fetch_slide"
+      - "adroit"
+      - "ufactory_xarm7"
+      - "ufactory_lite6"
+      - "ur5e"
+      - "ur10e"
+      - "franka_emika_panda"
+      - "kuka_iiwa"
+      - "trossen_wxai"
+      - "aloha"
+      - "tiago"
+    name_exclude: []
+    attach_assets:
+      - "_articulated_objects_"
+      - "stable_hope_objects"
+      - "shapenet"
+      - "duplo"
+
+  - id: C12
+    name_zh: "版本 / 安装 / 构建 / 绑定选择 (preflight)"
+    description: "Not core physics; corpus preflight to ensure every source can be loaded across MuJoCo / Python versions."
+    doc_anchor: "C12. 版本 / 安装 / 构建 / 绑定选择类"
+    operators:
+      - python_version_matrix
+      - mujoco_version_matrix
+      - mujoco_vs_mujoco_py
+      - cython_matrix
+      - gl_backend_env
+      - compiler_os_matrix
+      - package_import_smoke
+      - ci_cold_install
+    oracles:
+      - import_success
+      - build_wheel_success
+      - dependency_resolver
+      - api_field_existence
+      - wrong_backend
+      - platform_compile_error
+      - install_timeout
+      - runtime_abi_mismatch
+    sources: [mujoco, dm_control, gym_robotics, myosuite, robosuite, mujoco_mpc, mujoco_playground, mjx]
+    name_match:
+      - "_scene$"          # one representative scene per repo is enough
+    name_exclude: []
+
+# ----------------------------------------------------------------------------
+# Extra targets (sources/seeds we want fetched even if upstream organisation
+# does not naturally feed them through the existing fetch_seeds.py rules).
+# build_seeds2.py reads `extra_fetch.sources` to optionally re-invoke
+# fetch_seeds.py with `--only <names>` for completeness.
+# ----------------------------------------------------------------------------
+extra_fetch:
+  sources:
+    - menagerie       # ensure skydio_x2 + bitcraze classified as actor (regex now matches)
+    - mujoco_playground
+    - mjx
+    - myosuite

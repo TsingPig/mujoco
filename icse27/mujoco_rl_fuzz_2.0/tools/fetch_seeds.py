@@ -235,7 +235,8 @@ _ACTOR_NAME_HINT_RE = _re.compile(
     r"allegro|shadow|leap|fruitfly|fly|rodent|piper|talos|pendulum|cheetah|"
     r"hopper|swimmer|reacher|pusher|drone|crazyflie|toddlerbot|robot|"
     r"tendon_arm|slider_crank|gripper|finger|softfoot|op3|tidybot|jaco|gr1|"
-    r"trossen|aero|wonik|flexiv|rizon|kuka|trs_so_arm|ufactory|lite6)",
+    r"trossen|aero|wonik|flexiv|rizon|kuka|trs_so_arm|ufactory|lite6|"
+    r"skydio|x2|bitcraze|crazyflie|quadcopter|aerial)",
     _re.I,
 )
 # nbody/nu above this threshold strongly suggests soft body / replicated demo

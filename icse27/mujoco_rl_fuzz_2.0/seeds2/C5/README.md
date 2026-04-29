@@ -1,0 +1,92 @@
+# C5 — 执行器 / 控制范围 / gear / 力方向 / tracking
+
+> Actuator targets, ctrlrange, gear sign / magnitude, muscle / inverse dynamics tracking inconsistencies.
+
+**Doc anchor:** `C5. 执行器 / 控制范围 / gear / force direction / tracking 类`
+
+**Members:** 59
+
+## Suggested operators
+
+- `ctrlrange_mutation`
+- `joint_range_mutation`
+- `single_actuator_sweep`
+- `target_qpos_replay`
+- `gear_sign_flip`
+- `gear_magnitude_scale`
+- `kp_kd_sweep`
+- `actuator_force_perturb`
+- `inv_dyn_ctrl_reconstruction`
+- `hold_stationary`
+
+## Suggested oracles
+
+- `target_vs_actual_steady_state`
+- `end_effector_pose_error`
+- `overshoot_settling`
+- `actuator_axis_isolation`
+- `drone_yaw_roll_pitch_torque_balance`
+- `qfrc_actuator_inv_dyn_residual`
+- `zero_target_drift`
+
+## Members
+
+- `menagerie__agilex_piper_piper`
+- `menagerie__agilex_piper_scene`
+- `menagerie__boston_dynamics_spot_spot_arm`
+- `menagerie__flexiv_rizon4_flexiv_rizon4`
+- `menagerie__flexiv_rizon4_scene`
+- `menagerie__franka_emika_panda_hand`
+- `menagerie__franka_emika_panda_mjx_hand`
+- `menagerie__franka_emika_panda_mjx_panda`
+- `menagerie__franka_emika_panda_mjx_panda_nohand`
+- `menagerie__franka_emika_panda_mjx_scene`
+- `menagerie__franka_emika_panda_mjx_single_cube`
+- `menagerie__franka_emika_panda_panda`
+- `menagerie__franka_emika_panda_panda_nohand`
+- `menagerie__franka_emika_panda_scene`
+- `menagerie__kuka_iiwa_14_iiwa14`
+- `menagerie__kuka_iiwa_14_scene`
+- `menagerie__leap_hand_left_hand`
+- `menagerie__leap_hand_right_hand`
+- `menagerie__shadow_dexee_scene`
+- `menagerie__shadow_dexee_shadow_dexee`
+- `menagerie__shadow_hand_left_hand`
+- `menagerie__shadow_hand_right_hand`
+- `menagerie__trossen_vx300s_scene`
+- `menagerie__trossen_vx300s_vx300s`
+- `menagerie__trossen_wx250s_scene`
+- `menagerie__trossen_wx250s_wx250s`
+- `menagerie__trossen_wxai_scene`
+- `menagerie__trossen_wxai_trossen_ai_bimanual`
+- `menagerie__trs_so_arm100_scene`
+- `menagerie__trs_so_arm100_so_arm100`
+- `menagerie__ufactory_lite6_lite6`
+- `menagerie__ufactory_lite6_lite6_gripper_narrow`
+- `menagerie__ufactory_lite6_lite6_gripper_wide`
+- `menagerie__ufactory_lite6_scene`
+- `menagerie__ufactory_xarm7_hand`
+- `menagerie__ufactory_xarm7_scene`
+- `menagerie__ufactory_xarm7_xarm7`
+- `menagerie__ufactory_xarm7_xarm7_nohand`
+- `menagerie__umi_gripper_scene`
+- `menagerie__umi_gripper_umi_gripper`
+- `menagerie__universal_robots_ur10e_scene`
+- `menagerie__universal_robots_ur10e_ur10e`
+- `menagerie__universal_robots_ur5e_scene`
+- `menagerie__universal_robots_ur5e_ur5e`
+- `menagerie__wonik_allegro_left_hand`
+- `menagerie__wonik_allegro_right_hand`
+- `mjx__mjx_mujoco_mjx_test_data_shadow_hand_right_hand`
+- `myosuite__myosuite_simhive_myo_sim_elbow_myoelbow_1dof6muscles_1dofSoftexo_Ideal`
+- `robosuite__robosuite_models_assets_grippers_panda_gripper`
+- `robosuite__robosuite_models_assets_grippers_rethink_gripper`
+- `robosuite__robosuite_models_assets_grippers_robotiq_gripper_140`
+- `robosuite__robosuite_models_assets_grippers_robotiq_gripper_s`
+- `robosuite__robosuite_models_assets_robots_iiwa_robot`
+- `robosuite__robosuite_models_assets_robots_kinova3_robot`
+- `robosuite__robosuite_models_assets_robots_panda_robot`
+- `robosuite__robosuite_models_assets_robots_spot_arm_robot`
+- `robosuite__robosuite_models_assets_robots_ur5e_robot`
+- `safety_gymnasium__safety_gymnasium_tasks_safe_isaac_gym_envs_assets_mjcf_shadow_hand_description_shadow_hand`
+- `safety_gymnasium__safety_gymnasium_tasks_safe_isaac_gym_envs_assets_mjcf_shadow_hand_description_shadow_hand1`
