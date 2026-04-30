@@ -17,6 +17,9 @@ Menagerie 的定位是 Google DeepMind curated 的高质量 MuJoCo 模型集合�
 
 第二类是 **惯量/质量参数错误或不合理**。Stanford TidyBot base 的 issue #231 指出 60kg base 的 `diaginertia=0.001` 极不现实，会让机器人像点质量一样轻微受力就高速旋转，并建议改成约 `2.708 kg*m^2` 量级。([GitHub][3]) Kinova Gen3 的 issue #232 也报告机械臂 bare env 中刚 spawn 就出现 bouncing / violent oscillations，尤其 joint 3 和 joint 7，用户提出的修复包括降低 actuator gains、增加 armature/damping、添加相邻 body 的 contact exclusions。([GitHub][4]) 这说明“惯量—控制器—接触”之间的组合错误是真实存在的。
 
+>  
+
+
 第三类是 **碰撞体配置错误**。UR10e 的 issue #192 报告 shoulder link 的 collision size 可能错误，会和地面产生异常碰撞，导致大 contact force 和仿真不稳定；报告者给出最小复现：注释 keyframe 后直接运行 simulate，即可看到 shoulder_link 与 ground 发生异常接触，修改 size 可解决。([GitHub][5]) 这类问题也很适合 fuzzing：你可以在 reset 后检查“非预期初始接触”“巨大 contact force”“visual-collision mismatch”“自碰撞/地面穿插”。
 
 第四类是 **执行器定义、控制范围、控制维度错误**。KUKA iiwa14 的 issue #214 质疑 actuator `ctrlrange` 与 joint range 完全一致，可能与 position control 语义不匹配。([GitHub][6]) Shadow DEX-EE 的 issue #209 指出该模型用了 `mujoco.pid` plugin 和 `actdim=2`，导致 Brax vmap 后输出 action dimension = 12，但模型期望 24，从而触发维度 mismatch。([GitHub][7]) 这类问题可以通过“读取模型维度 + runtime action injection + backend compatibility oracle”检测。

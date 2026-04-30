@@ -524,6 +524,75 @@ def _seed_tip_html(m: dict) -> str:
 
 
 _CACHE: dict | None = None
+_BUGS_CACHE: dict | None = None
+
+# --------------------------------------------------------------------------
+# 真实历史 bug：解析 _docs/mujoco_bug_reports_80cases.md（表格）+
+# _docs/mujoco_bug_taxonomy_seed_operator_oracle.md（每个 Cn 的代表性 ID 列表）
+# 让前端在每个分类卡片下渲染对应的真实 bug 小按钮。
+# --------------------------------------------------------------------------
+_BUG_ID_RE = __import__("re").compile(r"^[A-Z]{2,4}-\d{3}$")
+_REPO_SHORT_RE = __import__("re").compile(r"`([^`]+)`")
+_BACKTICK_ID_RE = __import__("re").compile(r"`([A-Z]{2,4}-\d{3})`")
+_LINK_RE = __import__("re").compile(r"\[[^\]]+\]\((https?://[^)]+)\)")
+_CAT_HEADER_RE = __import__("re").compile(r"^###\s+(C\d{1,2})\.\s+(.+?)$")
+
+
+def _load_bug_reports() -> dict:
+    """Parse the 80-case bug-report markdown + taxonomy doc.
+
+    Returns ``{"bugs": {id: {...}}, "cat_bugs": {cat_id: [id, ...]}}``.
+    Cached. Both files are optional; missing files yield empty maps so the
+    GUI degrades gracefully.
+    """
+    global _BUGS_CACHE
+    if _BUGS_CACHE is not None:
+        return _BUGS_CACHE
+    docs = ROOT / "_docs"
+    reports_md = docs / "mujoco_bug_reports_80cases.md"
+    taxonomy_md = docs / "mujoco_bug_taxonomy_seed_operator_oracle.md"
+    bugs: dict[str, dict] = {}
+    if reports_md.is_file():
+        for raw in reports_md.read_text(encoding="utf-8").splitlines():
+            if not raw.startswith("|"):
+                continue
+            cells = [c.strip() for c in raw.strip().strip("|").split("|")]
+            if len(cells) < 10:
+                continue
+            bid = cells[0]
+            if not _BUG_ID_RE.match(bid):
+                continue
+            repo_m = _REPO_SHORT_RE.search(cells[1] or "")
+            repo = repo_m.group(1) if repo_m else cells[1]
+            source_label = cells[2]                       # e.g. "Issue #251"
+            title_zh = cells[3]                           # 中英混合的标题/现象
+            link_m = _LINK_RE.search(cells[9] or "")
+            url = link_m.group(1) if link_m else ""
+            bugs[bid] = {
+                "id": bid,
+                "repo": repo,
+                "source_label": source_label,
+                "title": title_zh,
+                "url": url,
+            }
+    cat_bugs: dict[str, list[str]] = {}
+    if taxonomy_md.is_file():
+        cur_cid: str | None = None
+        for raw in taxonomy_md.read_text(encoding="utf-8").splitlines():
+            mh = _CAT_HEADER_RE.match(raw)
+            if mh:
+                cur_cid = mh.group(1)
+                cat_bugs.setdefault(cur_cid, [])
+                continue
+            if cur_cid and "代表性历史报告" in raw:
+                ids = _BACKTICK_ID_RE.findall(raw)
+                # de-dup, preserve order
+                seen: set[str] = set()
+                for x in ids:
+                    if x not in seen:
+                        seen.add(x); cat_bugs[cur_cid].append(x)
+    _BUGS_CACHE = {"bugs": bugs, "cat_bugs": cat_bugs}
+    return _BUGS_CACHE
 
 
 def _load() -> dict:
@@ -630,16 +699,31 @@ INDEX_HTML = """<!doctype html>
                background: linear-gradient(90deg, #2563eb0d, transparent); }
   .ops-block.oracle-block { border-left-color: #16a34a88;
                background: linear-gradient(90deg, #16a34a10, transparent); }
+  .ops-block.bugs-block   { border-left-color: #dc262688;
+               background: linear-gradient(90deg, #dc262610, transparent); }
   .ops-label { display: inline-block; font-size: 11px; font-weight: 700;
                text-transform: uppercase; letter-spacing: .04em;
                color: #2563eb; margin-right: 6px; }
   .ops-block.oracle-block .ops-label { color: #16a34a; }
+  .ops-block.bugs-block   .ops-label { color: #dc2626; }
   .ops-chip  { display: inline-block; font-family: ui-monospace, Consolas, monospace;
                font-size: 12px; padding: 2px 8px; margin: 2px 4px 2px 0;
                background: #ffffff10; border: 1px solid #8884; border-radius: 5px;
                color: inherit; }
   .ops-chip:hover { border-color: #2563eb; color: #2563eb; }
   .oracle-block .ops-chip:hover { border-color: #16a34a; color: #16a34a; }
+  /* —— bugs chip：双拼小按钮（ID 段 + ↗ 跳转段） —— */
+  .bug-chip { display: inline-flex; align-items: stretch; margin: 2px 4px 2px 0;
+              border: 1px solid #dc262655; border-radius: 5px; overflow: hidden;
+              font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+              line-height: 1.4; cursor: help; background: #dc262610; }
+  .bug-chip .bug-id   { padding: 2px 7px; color: #b91c1c; font-weight: 600; }
+  .bug-chip .bug-link { padding: 2px 6px; border-left: 1px solid #dc262633;
+                        color: #b91c1c; text-decoration: none; cursor: pointer; }
+  .bug-chip:hover { border-color: #dc2626; }
+  .bug-chip:hover .bug-id, .bug-chip:hover .bug-link { color: #7f1d1d; }
+  .bug-chip .bug-link:hover { background: #dc2626; color: white; }
+  .bug-chip.dead .bug-link  { opacity: .35; pointer-events: none; }
   table.seeds { width: 100%; border-collapse: collapse; font-size: 12px;
                 margin-top: 4px; }
   table.seeds th { text-align: left; font-weight: 500; color: #888;
@@ -962,6 +1046,22 @@ function renderCats() {
       const tip = TIPS.or[o] || "(暂无说明)";
       return `<span class="ops-chip" data-tip="<b>${escHtml(o)}</b><div class='tip-sep'></div>${escHtml(tip)}">${escHtml(o)}</span>`;
     }).join("");
+    const bugs = (c.bugs || []).map(b => {
+      const tipParts = [
+        `<div class='tip-h'><b>${escHtml(b.id)}</b>`
+        + (b.repo ? ` <span class='tip-dim'>· ${escHtml(b.repo)}</span>` : "")
+        + (b.source_label ? ` <span class='tip-dim'>· ${escHtml(b.source_label)}</span>` : "")
+        + `</div>`,
+        `<div class='tip-line'>${escHtml(b.title || '(无简介)')}</div>`,
+      ];
+      if (b.url) tipParts.push(`<div class='tip-sep'></div><div class='tip-line tip-dim'>🌐 <code>${escHtml(b.url)}</code></div>`);
+      const tip = tipParts.join("");
+      const linkPart = b.url
+        ? `<a class="bug-link" href="${escHtml(b.url)}" target="_blank" rel="noopener" data-tip="跳转 GitHub：<br><code>${escHtml(b.url)}</code>" onclick="event.stopPropagation();">↗</a>`
+        : `<span class="bug-link" title="无链接">↗</span>`;
+      const cls = b.url ? "bug-chip" : "bug-chip dead";
+      return `<span class="${cls}" data-tip="${escHtml(tip)}"><span class="bug-id">${escHtml(b.id)}</span>${linkPart}</span>`;
+    }).join("");
     det.innerHTML = `
       <summary>
         <span class="cat-id">${c.id}</span>${escHtml(c.name_zh || "")}
@@ -970,6 +1070,7 @@ function renderCats() {
       <div class="cat-desc">${escHtml(c.description || "")}</div>
       <div class="ops-block"><span class="ops-label">Operators</span>${ops || '<span class="ops-chip">(none)</span>'}</div>
       <div class="ops-block oracle-block"><span class="ops-label">Oracles</span>${oracles || '<span class="ops-chip">(none)</span>'}</div>
+      <div class="ops-block bugs-block"><span class="ops-label">Bugs (real, ${(c.bugs||[]).length})</span>${bugs || '<span class="ops-chip">(none)</span>'}</div>
       <div class="seed-table"></div>
     `;
     det.querySelector(".seed-table").innerHTML = buildSeedTable(seeds, q);
@@ -1181,15 +1282,31 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _state_payload(self, refresh: bool) -> dict:
-        global _CACHE
+        global _CACHE, _BUGS_CACHE
         if refresh:
             _CACHE = None
+            _BUGS_CACHE = None
         s = _load()
+        bugdb = _load_bug_reports()
+        bugs_map = bugdb["bugs"]; cat_bugs = bugdb["cat_bugs"]
+
+        def _cat_with_bugs(c: dict) -> dict:
+            out = {k: v for k, v in c.items() if k in
+                   ("id", "name_zh", "description", "doc_anchor",
+                    "operators", "oracles", "sources")}
+            ids = cat_bugs.get(c["id"], [])
+            out["bugs"] = [
+                bugs_map[i] for i in ids if i in bugs_map
+            ]
+            # also surface ids that have no body (rare) so user still sees them
+            for i in ids:
+                if i not in bugs_map:
+                    out["bugs"].append({"id": i, "title": "(详情未在 80cases 文档中)",
+                                        "url": "", "repo": "", "source_label": ""})
+            return out
+
         return {
-            "cats": [{k: v for k, v in c.items() if k in
-                      ("id", "name_zh", "description", "doc_anchor",
-                       "operators", "oracles", "sources")}
-                     for c in s["cats"]],
+            "cats": [_cat_with_bugs(c) for c in s["cats"]],
             "grouped": s["grouped"],
             "manifest": s["manifest"],
             "uncategorized": s["uncategorized"],
