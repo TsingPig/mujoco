@@ -1,0 +1,13 @@
+{
+  "source": "generated",
+  "repo": null,
+  "commit": null,
+  "package": null,
+  "package_version": null,
+  "src_rel_path": null,
+  "local_path": "seeds\\synthetic_scenes\\scene_0004_humanoid_obstacle_menagerie__low_cost_robot_arm_sc",
+  "license_path": null,
+  "collected_at": "2026-05-03T11:06:42.813734Z",
+  "notes": "composed from actor menagerie__low_cost_robot_arm_scene via template humanoid_obstacle",
+  "extra": {}
+}

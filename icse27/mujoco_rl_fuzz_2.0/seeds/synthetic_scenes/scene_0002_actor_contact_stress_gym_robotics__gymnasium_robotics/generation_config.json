@@ -1,0 +1,6 @@
+{
+  "template": "actor_contact_stress",
+  "actor_seed_id": "gym_robotics__gymnasium_robotics_envs_mujoco_assets_half_cheetah",
+  "actor_xml_path": "F:\\--CodeRepo\\--CodeRepo\\Research\\___Mujoco\\mujoco\\mujoco\\icse27\\mujoco_rl_fuzz_2.0\\seeds\\curated\\gym_robotics__gymnasium_robotics_envs_mujoco_assets_half_cheetah\\model.xml",
+  "seed": 797926
+}

@@ -1,0 +1,10 @@
+<mujoco model="scene_humanoid_obstacle_98418">
+  <compiler angle="radian" autolimits="true"/>
+  <include file="../../curated/menagerie__low_cost_robot_arm_scene/model.xml"/>
+  <worldbody>
+    <geom name="arena_floor" type="plane" size="4.0 4.0 0.1" contype="1" conaffinity="1"/>
+    <body name="prop_obstacle" pos="0.8 0.0 0.15">
+      <geom name="propgeom_obstacle" type="box" size="0.1 0.5 0.15" rgba="0.9 0.2 0.2 1" contype="1" conaffinity="1"/>
+    </body>
+  </worldbody>
+</mujoco>

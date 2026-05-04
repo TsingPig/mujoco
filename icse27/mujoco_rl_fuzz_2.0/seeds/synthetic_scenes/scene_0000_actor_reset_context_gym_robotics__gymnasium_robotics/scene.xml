@@ -1,0 +1,7 @@
+<mujoco model="scene_actor_reset_context_888598">
+  <compiler angle="radian" autolimits="true"/>
+  <include file="../../curated/gym_robotics__gymnasium_robotics_envs_mujoco_assets_inverted_double_pendulum/model.xml"/>
+  <worldbody>
+    <geom name="arena_floor" type="plane" size="2.0 2.0 0.1" contype="1" conaffinity="1"/>
+  </worldbody>
+</mujoco>

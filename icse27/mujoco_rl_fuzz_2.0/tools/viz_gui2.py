@@ -666,6 +666,84 @@ def spawn(cmd: list[str]) -> int:
     return proc.pid
 
 
+# ---- 分层语料库 + Findings 加载 (③ ④) ---------------------------------
+
+_CORPUS_CACHE: dict | None = None
+_FINDINGS_CACHE: list | None = None
+
+
+def _load_corpus_layers(force: bool = False) -> dict:
+    """Read L1/L2/L3 manifests and return a dict of lists (JSON-serialisable)."""
+    global _CORPUS_CACHE
+    if _CORPUS_CACHE is not None and not force:
+        return _CORPUS_CACHE
+    try:
+        from src.corpus import iter_manifest
+    except ImportError:
+        _CORPUS_CACHE = {"synthetic_scenes": [], "open_envs": [], "trajectory_seeds": []}
+        return _CORPUS_CACHE
+
+    def _read(rel: str, fields: list[str]) -> list[dict]:
+        import dataclasses
+        p = ROOT / rel
+        if not p.exists():
+            return []
+        out = []
+        for row in iter_manifest(p):
+            if dataclasses.is_dataclass(row):
+                d = dataclasses.asdict(row)
+            elif hasattr(row, "__dict__"):
+                d = vars(row)
+            else:
+                d = dict(row) if hasattr(row, "items") else {}
+            out.append({f: d.get(f, "") for f in fields})
+        return out
+
+    _CORPUS_CACHE = {
+        "synthetic_scenes": _read(
+            "seeds/synthetic_scenes/manifest.jsonl",
+            ["seed_id", "template_name", "actor_seed_id",
+             "compile_status", "nq", "nbody", "nu"]),
+        "open_envs": _read(
+            "seeds/open_envs/manifest.jsonl",
+            ["env_id", "adapter_name", "dependency_status",
+             "runnable_status", "tags"]),
+        "trajectory_seeds": _read(
+            "seeds/trajectory_seeds/manifest.jsonl",
+            ["seed_id", "parent_seed_id", "parent_layer",
+             "replay_status", "action_kind", "horizon"]),
+    }
+    return _CORPUS_CACHE
+
+
+def _load_findings(force: bool = False) -> list:
+    """Scan findings/**/*.json and return list sorted by severity desc."""
+    global _FINDINGS_CACHE
+    if _FINDINGS_CACHE is not None and not force:
+        return _FINDINGS_CACHE
+    findings_root = ROOT / "findings"
+    out: list[dict] = []
+    if findings_root.exists():
+        for fpath in sorted(findings_root.rglob("*.json")):
+            try:
+                d = json.loads(fpath.read_text(encoding="utf-8"))
+                sev = sum(o.get("severity", 0) for o in d.get("oracle_signals", []))
+                out.append({
+                    "finding_id": d.get("finding_id", fpath.stem),
+                    "seed_id":    d.get("seed_id", ""),
+                    "layer":      d.get("layer", ""),
+                    "signature":  d.get("signature", ""),
+                    "severity":   round(sev, 2),
+                    "oracle_signals": d.get("oracle_signals", []),
+                    "_path": str(fpath.relative_to(ROOT)).replace("\\", "/"),
+                })
+            except Exception:
+                continue
+    out.sort(key=lambda x: -x["severity"])
+    _FINDINGS_CACHE = out
+    return out
+
+
 INDEX_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -818,6 +896,8 @@ INDEX_HTML = """<!doctype html>
   .intens-chip.invalid:hover { background: #dc2626; color: white; }
   .intens-chip.all   { border-style: dashed; }
   .mut-empty { color: #aaa; font-size: 11px; }
+  /* ---- corpus tab panes ---- */
+  .corpus-tab-btn.on { background: #2563eb; color: white; border-color: #2563eb; }
 </style>
 </head>
 <body>
@@ -870,6 +950,57 @@ INDEX_HTML = """<!doctype html>
 </div>
 
 <div class="card">
+  <details open id="sec-corpus">
+  <summary>③ 分层语料库 <small style="font-weight:400;color:#888">(L1 合成场景 / L2 开源环境 / L3 轨迹种子)</small></summary>
+  <div class="toolbar" style="margin-top:8px">
+    <button class="ghost corpus-tab-btn" data-tab="l1">L1 合成场景 <span class="pill cnt" id="l1-count"></span></button>
+    <button class="ghost corpus-tab-btn" data-tab="l2">L2 开源环境 <span class="pill cnt" id="l2-count"></span></button>
+    <button class="ghost corpus-tab-btn" data-tab="l3">L3 轨迹种子 <span class="pill cnt" id="l3-count"></span></button>
+    <button class="ghost" id="refresh-corpus">⟳ 刷新</button>
+    <span style="margin-left:auto;display:flex;gap:6px">
+      <button class="ghost" id="btn-validate">📋 验证语料库</button>
+      <button class="ghost" id="btn-rand-fuzz">🎲 随机 Fuzz×20</button>
+      <button class="ghost" id="btn-rule-fuzz">📐 规则 Fuzz×20</button>
+    </span>
+  </div>
+  <div class="corpus-tab-pane" data-tab="l1">
+    <div class="toolbar"><input type="text" id="l1-filter" placeholder="过滤 seed_id / template..." style="min-width:260px"/></div>
+    <table class="seeds"><thead><tr>
+      <th>seed_id</th><th>template</th><th>actor</th><th>compile</th>
+      <th class="num">nq</th><th class="num">nbody</th><th class="num">nu</th><th>动作</th>
+    </tr></thead><tbody id="l1-tbody"></tbody></table>
+  </div>
+  <div class="corpus-tab-pane" data-tab="l2" style="display:none">
+    <div class="toolbar"><input type="text" id="l2-filter" placeholder="过滤 env_id / adapter..." style="min-width:260px"/></div>
+    <table class="seeds"><thead><tr>
+      <th>env_id</th><th>adapter</th><th>依赖</th><th>可运行</th><th>tags</th>
+    </tr></thead><tbody id="l2-tbody"></tbody></table>
+  </div>
+  <div class="corpus-tab-pane" data-tab="l3" style="display:none">
+    <div class="toolbar"><input type="text" id="l3-filter" placeholder="过滤 seed_id / parent..." style="min-width:260px"/></div>
+    <table class="seeds"><thead><tr>
+      <th>seed_id</th><th>parent</th><th>layer</th><th>replay</th><th>action_kind</th><th class="num">horizon</th>
+    </tr></thead><tbody id="l3-tbody"></tbody></table>
+  </div>
+  </details>
+</div>
+
+<div class="card">
+  <details open id="sec-findings">
+  <summary>④ Findings <span class="pill cnt" id="findings-count"></span></summary>
+  <div class="toolbar" style="margin-top:8px">
+    <input type="text" id="findings-filter" placeholder="过滤 finding_id / seed_id / layer / signature..." style="min-width:300px"/>
+    <button class="ghost" id="refresh-findings" style="margin-left:auto">⟳ 刷新</button>
+  </div>
+  <table class="seeds"><thead><tr>
+    <th>finding_id</th><th>seed_id</th><th>layer</th><th>severity</th>
+    <th>failed oracles</th><th>signature</th><th>path</th>
+  </tr></thead><tbody id="findings-tbody"></tbody></table>
+  <div style="font-size:11px;color:#888;margin-top:6px">findings/ 目录下所有 .json 文件自动扫描，按 severity 降序排列。</div>
+  </details>
+</div>
+
+<div class="card">
   <h3 style="margin:0 0 6px 0;font-size:13px;color:#888">日志</h3>
   <div id="log">(等待操作)</div>
 </div>
@@ -878,6 +1009,8 @@ INDEX_HTML = """<!doctype html>
 const STATE = __STATE__;          // {cats, grouped, manifest, uncategorized}
 const MUTS = __MUTS__;
 const TIPS = __TIPS__;            // {col, op, or, src}
+let CORPUS = __CORPUS__;
+let FINDINGS = __FINDINGS__;
 
 // ---- 浮层弹窗：监听全局 mouseover/mouseout，定位跟随鼠标 ----
 const $tip = document.createElement("div");
@@ -1263,6 +1396,159 @@ try { renderCats(); } catch (e) { log("[renderCats] " + (e.stack||e)); }
 try { rebuildMutDatalist(); } catch (e) { log("[rebuildMutDatalist] " + (e.stack||e)); }
 try { renderMuts(); } catch (e) { log("[renderMuts] " + (e.stack||e)); }
 try { refreshSeedInfo(); } catch (e) { log("[refreshSeedInfo] " + (e.stack||e)); }
+
+// ─────────────────────────────────────────────
+// ③ 分层语料库
+// ─────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function statusColor(v) {
+  if (!v) return "#888";
+  if (v === "ok" || v === "runnable") return "#16a34a";
+  if (v === "partial" || v === "unknown") return "#d97706";
+  if (v === "missing" || v === "failed" || v === "broken") return "#dc2626";
+  return "#888";
+}
+function statusPill(v) {
+  const c = statusColor(v);
+  return `<span style="display:inline-block;padding:1px 7px;border-radius:999px;font-size:10px;background:${c}22;color:${c}">${escHtml(v||"?")}</span>`;
+}
+
+const $tabBtns = document.querySelectorAll(".corpus-tab-btn");
+const $tabPanes = document.querySelectorAll(".corpus-tab-pane");
+function switchCorpusTab(name) {
+  $tabBtns.forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  $tabPanes.forEach(p => p.style.display = p.dataset.tab === name ? "" : "none");
+}
+$tabBtns.forEach(b => b.onclick = () => switchCorpusTab(b.dataset.tab));
+
+function renderL1() {
+  const tbody = document.getElementById("l1-tbody");
+  if (!tbody) return;
+  const filt = document.getElementById("l1-filter").value.trim().toLowerCase();
+  const items = CORPUS.synthetic_scenes.filter(s =>
+    !filt || s.seed_id.toLowerCase().includes(filt) || s.template_name.toLowerCase().includes(filt));
+  tbody.innerHTML = "";
+  for (const s of items) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="seed-name">${escHtml(s.seed_id)}</td>
+      <td>${escHtml(s.template_name)}</td>
+      <td class="seed-name" style="font-size:10px">${escHtml(s.actor_seed_id)}</td>
+      <td>${statusPill(s.compile_status)}</td>
+      <td class="num">${s.nq}</td><td class="num">${s.nbody}</td><td class="num">${s.nu}</td>
+      <td>
+        <button class="ghost iconbtn" title="visualize_corpus --show">▶</button>
+        <button class="ghost iconbtn" title="--rollout">↻</button>
+      </td>`;
+    tr.querySelectorAll("button")[0].onclick = () => launch({tool:"corpus_show", seed_id:s.seed_id});
+    tr.querySelectorAll("button")[1].onclick = () => launch({tool:"corpus_show", seed_id:s.seed_id, rollout:true});
+    tbody.appendChild(tr);
+  }
+  document.getElementById("l1-count").textContent = items.length + "/" + CORPUS.synthetic_scenes.length;
+}
+
+function renderL2() {
+  const tbody = document.getElementById("l2-tbody");
+  if (!tbody) return;
+  const filt = document.getElementById("l2-filter").value.trim().toLowerCase();
+  const items = CORPUS.open_envs.filter(s =>
+    !filt || s.env_id.toLowerCase().includes(filt) || s.adapter_name.toLowerCase().includes(filt));
+  tbody.innerHTML = "";
+  for (const s of items) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="seed-name" style="font-size:11px">${escHtml(s.env_id)}</td>
+      <td><span class="pill src">${escHtml(s.adapter_name)}</span></td>
+      <td>${statusPill(s.dependency_status)}</td>
+      <td>${statusPill(s.runnable_status)}</td>
+      <td style="font-size:11px;color:#888">${escHtml((s.tags||[]).join(", "))}</td>`;
+    tbody.appendChild(tr);
+  }
+  document.getElementById("l2-count").textContent = items.length + "/" + CORPUS.open_envs.length;
+}
+
+function renderL3() {
+  const tbody = document.getElementById("l3-tbody");
+  if (!tbody) return;
+  const filt = document.getElementById("l3-filter").value.trim().toLowerCase();
+  const items = CORPUS.trajectory_seeds.filter(s =>
+    !filt || s.seed_id.toLowerCase().includes(filt) || s.parent_seed_id.toLowerCase().includes(filt));
+  tbody.innerHTML = "";
+  for (const s of items) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="seed-name" style="font-size:11px">${escHtml(s.seed_id)}</td>
+      <td style="font-size:11px;color:#888">${escHtml(s.parent_seed_id)}</td>
+      <td><span class="pill src" style="font-size:10px">${escHtml(s.parent_layer)}</span></td>
+      <td>${statusPill(s.replay_status)}</td>
+      <td>${escHtml(s.action_kind)}</td>
+      <td class="num">${s.horizon}</td>`;
+    tbody.appendChild(tr);
+  }
+  document.getElementById("l3-count").textContent = items.length + "/" + CORPUS.trajectory_seeds.length;
+}
+
+document.getElementById("l1-filter").oninput = renderL1;
+document.getElementById("l2-filter").oninput = renderL2;
+document.getElementById("l3-filter").oninput = renderL3;
+
+document.getElementById("refresh-corpus").onclick = async () => {
+  const r = await fetch("/api/corpus?refresh=1"); const j = await r.json();
+  CORPUS = j.corpus; renderL1(); renderL2(); renderL3();
+  log("corpus 已刷新  L1=" + CORPUS.synthetic_scenes.length +
+      " L2=" + CORPUS.open_envs.length + " L3=" + CORPUS.trajectory_seeds.length);
+};
+document.getElementById("btn-validate").onclick = () =>
+  launch({tool:"run_tool", script:"validate_layered_corpus.py"});
+document.getElementById("btn-rand-fuzz").onclick = () =>
+  launch({tool:"run_tool", script:"run_random_fuzz.py", args:["--budget","20"]});
+document.getElementById("btn-rule-fuzz").onclick = () =>
+  launch({tool:"run_tool", script:"run_rule_fuzz.py", args:["--budget","20"]});
+
+switchCorpusTab("l1");
+try { renderL1(); renderL2(); renderL3(); } catch(e) { log("[corpus] " + (e.stack||e)); }
+
+// ─────────────────────────────────────────────
+// ④ Findings
+// ─────────────────────────────────────────────
+function renderFindings() {
+  const tbody = document.getElementById("findings-tbody");
+  if (!tbody) return;
+  const filt = document.getElementById("findings-filter").value.trim().toLowerCase();
+  const items = FINDINGS.filter(f =>
+    !filt || f.finding_id.toLowerCase().includes(filt) ||
+    f.seed_id.toLowerCase().includes(filt) || f.layer.toLowerCase().includes(filt) ||
+    f.signature.toLowerCase().includes(filt));
+  document.getElementById("findings-count").textContent = items.length + "/" + FINDINGS.length;
+  tbody.innerHTML = "";
+  for (const f of items) {
+    const tr = document.createElement("tr");
+    const oracles = (f.oracle_signals || []).filter(o => o.failed).map(o => o.name).join(", ");
+    const w = Math.min(60, f.severity * 10);
+    const sevBar = f.severity > 0
+      ? `<div style="display:inline-block;width:${w}px;height:7px;background:#dc2626;border-radius:4px;vertical-align:middle;margin-right:4px"></div>`
+      : "";
+    tr.innerHTML = `
+      <td class="seed-name" style="font-size:11px">${escHtml(f.finding_id)}</td>
+      <td style="font-size:11px">${escHtml(f.seed_id)}</td>
+      <td><span class="pill src">${escHtml(f.layer)}</span></td>
+      <td>${sevBar}<span class="num" style="font-size:11px">${f.severity.toFixed(1)}</span></td>
+      <td style="font-size:11px;color:#dc2626">${escHtml(oracles||"—")}</td>
+      <td style="font-size:10px;color:#888">${escHtml(f.signature)}</td>
+      <td style="font-size:10px;color:#888">${escHtml(f._path)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById("findings-filter").oninput = renderFindings;
+document.getElementById("refresh-findings").onclick = async () => {
+  const r = await fetch("/api/findings?refresh=1"); const j = await r.json();
+  FINDINGS = j.findings; renderFindings();
+  log("findings 已刷新 (" + FINDINGS.length + " 条)");
+};
+try { renderFindings(); } catch(e) { log("[findings] " + (e.stack||e)); }
 </script>
 </body>
 </html>
@@ -1328,7 +1614,9 @@ class Handler(BaseHTTPRequestHandler):
             html = (INDEX_HTML
                     .replace("__STATE__", json.dumps(state, ensure_ascii=False))
                     .replace("__MUTS__", json.dumps(mutator_catalog()))
-                    .replace("__TIPS__", json.dumps(tips, ensure_ascii=False)))
+                    .replace("__TIPS__", json.dumps(tips, ensure_ascii=False))
+                    .replace("__CORPUS__", json.dumps(_load_corpus_layers(), ensure_ascii=False))
+                    .replace("__FINDINGS__", json.dumps(_load_findings(), ensure_ascii=False)))
             data = html.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1338,6 +1626,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/state":
             return self._json(200, {"state": self._state_payload(refresh="refresh" in qs)})
+        if parsed.path == "/api/corpus":
+            return self._json(200, {"corpus": _load_corpus_layers(force="refresh" in qs)})
+        if parsed.path == "/api/findings":
+            return self._json(200, {"findings": _load_findings(force="refresh" in qs)})
         self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -1368,6 +1660,22 @@ class Handler(BaseHTTPRequestHandler):
                     cmd += ["--intensity", payload["intensity"]]
                 if payload.get("no_before"):
                     cmd.append("--no-before")
+            elif tool == "corpus_show":
+                seed_id = payload.get("seed_id")
+                if not seed_id:
+                    raise ValueError("seed_id required")
+                cmd = [PYTHON, str(TOOLS_DIR / "visualize_corpus.py"), "--show", seed_id]
+                if payload.get("rollout"):
+                    cmd.append("--rollout")
+            elif tool == "run_tool":
+                script = payload.get("script")
+                if not script:
+                    raise ValueError("script required")
+                # Security: only allow scripts that live in tools/ directory.
+                target = (TOOLS_DIR / script).resolve()
+                if not str(target).startswith(str(TOOLS_DIR.resolve())):
+                    raise ValueError(f"script must be inside tools/: {script!r}")
+                cmd = [PYTHON, str(target)] + list(payload.get("args", []))
             else:
                 raise ValueError(f"unknown tool: {tool!r}")
             return self._json(200, {"ok": True, "pid": spawn(cmd), "cmd": cmd})

@@ -261,6 +261,94 @@ def mutator_catalog() -> list[dict]:
     return out
 
 
+_CORPUS_CACHE: dict | None = None
+_FINDINGS_CACHE: list | None = None
+
+
+def _load_corpus_layers(force: bool = False) -> dict:
+    global _CORPUS_CACHE
+    if _CORPUS_CACHE is not None and not force:
+        return _CORPUS_CACHE
+    try:
+        from src.corpus import iter_manifest, SyntheticSceneSeed, OpenEnvSeed, TrajectorySeed
+    except Exception:
+        _CORPUS_CACHE = {"synthetic_scenes": [], "open_envs": [], "trajectory_seeds": []}
+        return _CORPUS_CACHE
+    result: dict = {"synthetic_scenes": [], "open_envs": [], "trajectory_seeds": []}
+    sm = ROOT / "seeds/synthetic_scenes/manifest.jsonl"
+    if sm.exists():
+        for s in iter_manifest(str(sm)):
+            if isinstance(s, SyntheticSceneSeed):
+                mf = s.model_features or {}
+                result["synthetic_scenes"].append({
+                    "seed_id": s.seed_id,
+                    "actor_seed_id": s.actor_seed_id or "",
+                    "template_name": s.template_name or "",
+                    "compile_status": s.compile_status or "",
+                    "scene_xml": (s.scene_xml or "").replace("\\", "/"),
+                    "nq": mf.get("nq", "?"), "nv": mf.get("nv", "?"),
+                    "nbody": mf.get("nbody", "?"), "ngeom": mf.get("ngeom", "?"),
+                    "nu": mf.get("nu", "?"),
+                    "tags": s.tags or [],
+                })
+    em = ROOT / "seeds/open_envs/manifest.jsonl"
+    if em.exists():
+        for s in iter_manifest(str(em)):
+            if isinstance(s, OpenEnvSeed):
+                result["open_envs"].append({
+                    "seed_id": s.seed_id,
+                    "adapter_name": s.adapter_name or "",
+                    "env_id": s.env_id or "",
+                    "dependency_status": s.dependency_status or "",
+                    "runnable_status": s.runnable_status or "",
+                    "package_name": s.package_name or "",
+                    "tags": s.tags or [],
+                })
+    tm = ROOT / "seeds/trajectory_seeds/manifest.jsonl"
+    if tm.exists():
+        for s in iter_manifest(str(tm)):
+            if isinstance(s, TrajectorySeed):
+                result["trajectory_seeds"].append({
+                    "seed_id": s.seed_id,
+                    "parent_seed_id": s.parent_seed_id or "",
+                    "parent_layer": s.parent_layer or "",
+                    "replay_status": s.replay_status or "",
+                    "action_kind": (s.action_sequence_spec or {}).get("kind", "?"),
+                    "horizon": (s.action_sequence_spec or {}).get("horizon", 0),
+                    "tags": s.tags or [],
+                })
+    _CORPUS_CACHE = result
+    return result
+
+
+def _load_findings(force: bool = False) -> list:
+    global _FINDINGS_CACHE
+    if _FINDINGS_CACHE is not None and not force:
+        return _FINDINGS_CACHE
+    findings_root = ROOT / "findings"
+    out: list = []
+    if findings_root.exists():
+        for fpath in sorted(findings_root.rglob("*.json")):
+            try:
+                d = json.loads(fpath.read_text(encoding="utf-8"))
+                sev = sum(o.get("severity", 0) for o in d.get("oracle_signals", []))
+                out.append({
+                    "finding_id": d.get("finding_id", fpath.stem),
+                    "seed_id": d.get("seed_id", ""),
+                    "layer": d.get("layer", ""),
+                    "signature": d.get("signature", ""),
+                    "severity": round(sev, 2),
+                    "oracle_signals": d.get("oracle_signals", []),
+                    "notes": d.get("notes", {}),
+                    "_path": str(fpath.relative_to(ROOT)).replace("\\", "/"),
+                })
+            except Exception:
+                continue
+    out.sort(key=lambda x: -x["severity"])
+    _FINDINGS_CACHE = out
+    return out
+
+
 def spawn(cmd: list[str]) -> int:
     """Spawn a detached subprocess so the GUI request returns immediately."""
     print(f"[spawn] {' '.join(cmd)}")
@@ -316,9 +404,12 @@ INDEX_HTML = """<!doctype html>
   .chip.on { background: #2563eb; color: white; border-color: #2563eb; }
   .chip .n { opacity: 0.7; font-variant-numeric: tabular-nums; }
   details > summary { cursor: pointer; font-weight: 600; font-size: 16px;
-                      list-style: none; padding: 4px 0; }
+                      list-style: none; padding: 4px 0; margin: 0; }
   details > summary::before { content: '▸ '; display: inline-block; transition: transform .15s; }
   details[open] > summary::before { content: '▾ '; }
+  .card > details > summary { border-radius: 6px; padding: 4px 6px; margin: -4px -6px; }
+  .card > details > summary:hover { background: #8881; }
+  .card > details[open] > summary { margin-bottom: 10px; }
   body.compact table.seeds td, body.compact table.seeds th { padding: 2px 6px; font-size: 12px; }
   .iconbtn { padding: 2px 6px; font-size: 11px; }
   mark { background: #fde047; color: inherit; padding: 0 1px; border-radius: 2px; }
@@ -360,7 +451,8 @@ INDEX_HTML = """<!doctype html>
 </div>
 
 <div class="card">
-  <h2 style="margin-top:0">① 种子（seed）<span class="pill src" id="seed-count"></span></h2>
+  <details open id="sec-seeds">
+  <summary>① 种子（seed）<span class="pill src" id="seed-count"></span></summary>
   <div class="toolbar">
     <input type="text" id="seed-filter" placeholder="过滤名字 / 源..." style="min-width:200px"/>
     <label>排序：</label>
@@ -399,10 +491,12 @@ INDEX_HTML = """<!doctype html>
     紫色「composed」徽章表示由 <code>tools/compose_arena.py</code> 用
     <code>&lt;replicate&gt;</code> 合成的多实例 arena（许可证继承父种子）。
   </div>
+  </details>
 </div>
 
 <div class="card">
-  <h2 style="margin-top:0">② Mutator 前后对比</h2>
+  <details open id="sec-mutators">
+  <summary>② Mutator 前后对比</summary>
   <div class="toolbar">
     <label>种子：</label>
     <input type="text" id="mut-seed" list="mut-seed-list" placeholder="输入名字搜索 / 留空 = synthetic 合成种子" style="min-width:380px"/>
@@ -412,6 +506,62 @@ INDEX_HTML = """<!doctype html>
     <input type="text" id="mut-filter" placeholder="过滤 mutator..." style="margin-left:auto;min-width:200px"/>
   </div>
   <div class="grid" id="muts"></div>
+  </details>
+</div>
+
+<div class="card">
+  <details open id="sec-corpus">
+  <summary>③ 分层语料库 <small style="font-weight:400;color:#888">(L1 合成场景 / L2 开源环境 / L3 轨迹种子)</small></summary>
+  <div class="toolbar">
+    <button class="ghost corpus-tab-btn" data-tab="l1">L1 合成场景 <span class="pill src" id="l1-count"></span></button>
+    <button class="ghost corpus-tab-btn" data-tab="l2">L2 开源环境 <span class="pill src" id="l2-count"></span></button>
+    <button class="ghost corpus-tab-btn" data-tab="l3">L3 轨迹种子 <span class="pill src" id="l3-count"></span></button>
+    <button class="ghost" id="refresh-corpus" title="重新读取 manifests">⟳ 刷新</button>
+    <span style="margin-left:auto;display:flex;gap:6px">
+      <button class="ghost" id="btn-validate" title="运行 validate_layered_corpus.py（弹出新终端）">📋 验证语料库</button>
+      <button class="ghost" id="btn-rand-fuzz" title="run_random_fuzz.py --budget 20">🎲 随机 Fuzz×20</button>
+      <button class="ghost" id="btn-rule-fuzz" title="run_rule_fuzz.py --budget 20">📐 规则 Fuzz×20</button>
+    </span>
+  </div>
+
+  <div class="corpus-tab-pane" data-tab="l1">
+    <div class="toolbar"><input type="text" id="l1-filter" placeholder="过滤 seed_id / template..." style="min-width:260px"/></div>
+    <table class="seeds"><thead><tr>
+      <th>seed_id</th><th>template</th><th>actor</th><th>compile</th>
+      <th class="num" title="广义坐标维度">nq</th><th class="num">nbody</th><th class="num">nu</th>
+      <th>动作</th>
+    </tr></thead><tbody id="l1-tbody"></tbody></table>
+  </div>
+
+  <div class="corpus-tab-pane" data-tab="l2" style="display:none">
+    <div class="toolbar"><input type="text" id="l2-filter" placeholder="过滤 env_id / adapter..." style="min-width:260px"/></div>
+    <table class="seeds"><thead><tr>
+      <th>env_id</th><th>adapter</th><th>依赖</th><th>可运行</th><th>tags</th>
+    </tr></thead><tbody id="l2-tbody"></tbody></table>
+  </div>
+
+  <div class="corpus-tab-pane" data-tab="l3" style="display:none">
+    <div class="toolbar"><input type="text" id="l3-filter" placeholder="过滤 seed_id / parent..." style="min-width:260px"/></div>
+    <table class="seeds"><thead><tr>
+      <th>seed_id</th><th>parent</th><th>layer</th><th>replay</th><th>action_kind</th><th class="num">horizon</th>
+    </tr></thead><tbody id="l3-tbody"></tbody></table>
+  </div>
+  </details>
+</div>
+
+<div class="card">
+  <details open id="sec-findings">
+  <summary>④ Findings <span class="pill src" id="findings-count"></span></summary>
+  <div class="toolbar">
+    <input type="text" id="findings-filter" placeholder="过滤 finding_id / seed_id / layer..." style="min-width:280px"/>
+    <button class="ghost" id="refresh-findings" style="margin-left:auto">⟳ 刷新</button>
+  </div>
+  <table class="seeds"><thead><tr>
+    <th>finding_id</th><th>seed_id</th><th>layer</th><th>severity</th>
+    <th>failed oracles</th><th>signature</th><th>path</th>
+  </tr></thead><tbody id="findings-tbody"></tbody></table>
+  <div class="legend">findings/ 目录下所有 .json 文件自动扫描，按 severity 降序排列。</div>
+  </details>
 </div>
 
 <div class="card">
@@ -423,6 +573,8 @@ INDEX_HTML = """<!doctype html>
 let SEEDS = __SEEDS__;
 const MUTS = __MUTS__;
 const SOURCE_INFO = __SOURCE_INFO__;
+let CORPUS = __CORPUS__;
+let FINDINGS = __FINDINGS__;
 
 const $log = document.getElementById("log");
 function log(msg) {
@@ -708,6 +860,156 @@ renderSeeds();
 rebuildMutSeedSelect();
 renderMuts();
 renderSources();
+
+// ─────────────────────────────────────────────
+// ③ 分层语料库 (L1 / L2 / L3)
+// ─────────────────────────────────────────────
+function statusColor(v) {
+  if (!v) return "#888";
+  if (v === "ok" || v === "runnable") return "#16a34a";
+  if (v === "partial" || v === "unknown") return "#d97706";
+  if (v === "missing" || v === "failed" || v === "broken") return "#dc2626";
+  return "#888";
+}
+function statusPill(v) {
+  const c = statusColor(v);
+  return `<span style="display:inline-block;padding:1px 7px;border-radius:999px;font-size:10px;background:${c}22;color:${c}">${escHtml(v||"?")}</span>`;
+}
+
+const $tabBtns = document.querySelectorAll(".corpus-tab-btn");
+const $tabPanes = document.querySelectorAll(".corpus-tab-pane");
+
+function switchTab(name) {
+  $tabBtns.forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  $tabPanes.forEach(p => p.style.display = p.dataset.tab === name ? "" : "none");
+}
+$tabBtns.forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+
+function renderL1() {
+  const tbody = document.getElementById("l1-tbody");
+  const filt = document.getElementById("l1-filter").value.trim().toLowerCase();
+  const items = CORPUS.synthetic_scenes.filter(s =>
+    !filt || s.seed_id.toLowerCase().includes(filt) || s.template_name.toLowerCase().includes(filt));
+  tbody.innerHTML = "";
+  for (const s of items) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="seed-name">${highlight(s.seed_id, filt)}</td>
+      <td>${escHtml(s.template_name)}</td>
+      <td class="seed-name" style="font-size:11px">${escHtml(s.actor_seed_id)}</td>
+      <td>${statusPill(s.compile_status)}</td>
+      <td class="num">${s.nq}</td><td class="num">${s.nbody}</td><td class="num">${s.nu}</td>
+      <td>
+        <button class="primary iconbtn" title="visualize_corpus --show">▶</button>
+        <button class="ghost iconbtn" title="--rollout">↻</button>
+      </td>`;
+    tr.querySelectorAll("button")[0].onclick = () => launch({tool:"corpus_show", seed_id:s.seed_id, rollout:false});
+    tr.querySelectorAll("button")[1].onclick = () => launch({tool:"corpus_show", seed_id:s.seed_id, rollout:true});
+    tbody.appendChild(tr);
+  }
+  document.getElementById("l1-count").textContent = items.length + " / " + CORPUS.synthetic_scenes.length;
+}
+
+function renderL2() {
+  const tbody = document.getElementById("l2-tbody");
+  const filt = document.getElementById("l2-filter").value.trim().toLowerCase();
+  const items = CORPUS.open_envs.filter(s =>
+    !filt || s.env_id.toLowerCase().includes(filt) || s.adapter_name.toLowerCase().includes(filt));
+  tbody.innerHTML = "";
+  for (const s of items) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="seed-name" style="font-size:11px">${highlight(s.env_id, filt)}</td>
+      <td><span class="pill src">${escHtml(s.adapter_name)}</span></td>
+      <td>${statusPill(s.dependency_status)}</td>
+      <td>${statusPill(s.runnable_status)}</td>
+      <td style="font-size:11px;color:#888">${escHtml((s.tags||[]).join(", "))}</td>`;
+    tbody.appendChild(tr);
+  }
+  document.getElementById("l2-count").textContent = items.length + " / " + CORPUS.open_envs.length;
+}
+
+function renderL3() {
+  const tbody = document.getElementById("l3-tbody");
+  const filt = document.getElementById("l3-filter").value.trim().toLowerCase();
+  const items = CORPUS.trajectory_seeds.filter(s =>
+    !filt || s.seed_id.toLowerCase().includes(filt) || s.parent_seed_id.toLowerCase().includes(filt));
+  tbody.innerHTML = "";
+  for (const s of items) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="seed-name" style="font-size:11px">${highlight(s.seed_id, filt)}</td>
+      <td style="font-size:11px;color:#888">${escHtml(s.parent_seed_id)}</td>
+      <td><span class="pill src" style="font-size:10px">${escHtml(s.parent_layer)}</span></td>
+      <td>${statusPill(s.replay_status)}</td>
+      <td>${escHtml(s.action_kind)}</td>
+      <td class="num">${s.horizon}</td>`;
+    tbody.appendChild(tr);
+  }
+  document.getElementById("l3-count").textContent = items.length + " / " + CORPUS.trajectory_seeds.length;
+}
+
+document.getElementById("l1-filter").oninput = renderL1;
+document.getElementById("l2-filter").oninput = renderL2;
+document.getElementById("l3-filter").oninput = renderL3;
+
+document.getElementById("refresh-corpus").onclick = async () => {
+  const r = await fetch("/api/corpus?refresh=1"); const j = await r.json();
+  CORPUS = j.corpus;
+  renderL1(); renderL2(); renderL3();
+  log("corpus reloaded  L1=" + CORPUS.synthetic_scenes.length +
+      " L2=" + CORPUS.open_envs.length + " L3=" + CORPUS.trajectory_seeds.length);
+};
+
+document.getElementById("btn-validate").onclick = () =>
+  launch({tool:"run_tool", script:"validate_layered_corpus.py"});
+document.getElementById("btn-rand-fuzz").onclick = () =>
+  launch({tool:"run_tool", script:"run_random_fuzz.py", args:["--budget","20"]});
+document.getElementById("btn-rule-fuzz").onclick = () =>
+  launch({tool:"run_tool", script:"run_rule_fuzz.py", args:["--budget","20"]});
+
+switchTab("l1");
+renderL1(); renderL2(); renderL3();
+
+// ─────────────────────────────────────────────
+// ④ Findings
+// ─────────────────────────────────────────────
+function renderFindings() {
+  const tbody = document.getElementById("findings-tbody");
+  const filt = document.getElementById("findings-filter").value.trim().toLowerCase();
+  const items = FINDINGS.filter(f =>
+    !filt || f.finding_id.toLowerCase().includes(filt) ||
+    f.seed_id.toLowerCase().includes(filt) || f.layer.toLowerCase().includes(filt) ||
+    f.signature.toLowerCase().includes(filt));
+  document.getElementById("findings-count").textContent = items.length + " / " + FINDINGS.length;
+  tbody.innerHTML = "";
+  for (const f of items) {
+    const tr = document.createElement("tr");
+    const oracles = (f.oracle_signals || []).filter(o => o.failed).map(o => o.name).join(", ");
+    const sevBar = f.severity > 0
+      ? `<div style="display:inline-block;width:${Math.min(60, f.severity*10)}px;height:8px;background:#dc2626;border-radius:4px;vertical-align:middle;margin-right:4px"></div>`
+      : "";
+    tr.innerHTML = `
+      <td class="seed-name" style="font-size:11px">${highlight(f.finding_id, filt)}</td>
+      <td style="font-size:11px">${escHtml(f.seed_id)}</td>
+      <td><span class="pill src">${escHtml(f.layer)}</span></td>
+      <td>${sevBar}<span class="num">${f.severity.toFixed(1)}</span></td>
+      <td style="font-size:11px;color:#dc2626">${escHtml(oracles||"(replay_failed)")}</td>
+      <td style="font-size:10px;color:#888">${escHtml(f.signature)}</td>
+      <td style="font-size:10px;color:#888">${escHtml(f._path)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById("findings-filter").oninput = renderFindings;
+document.getElementById("refresh-findings").onclick = async () => {
+  const r = await fetch("/api/findings?refresh=1"); const j = await r.json();
+  FINDINGS = j.findings;
+  renderFindings();
+  log("findings reloaded (" + FINDINGS.length + ")");
+};
+
+renderFindings();
 </script>
 </body>
 </html>
@@ -735,7 +1037,9 @@ class Handler(BaseHTTPRequestHandler):
             html = (INDEX_HTML
                     .replace("__SEEDS__", json.dumps(seeds))
                     .replace("__MUTS__", json.dumps(mutator_catalog()))
-                    .replace("__SOURCE_INFO__", json.dumps(SOURCE_INFO, ensure_ascii=False)))
+                    .replace("__SOURCE_INFO__", json.dumps(SOURCE_INFO, ensure_ascii=False))
+                    .replace("__CORPUS__", json.dumps(_load_corpus_layers(), ensure_ascii=False))
+                    .replace("__FINDINGS__", json.dumps(_load_findings(), ensure_ascii=False)))
             for k, v in FIELD_TOOLTIPS.items():
                 html = html.replace(f"__TT_{k}__", v.replace('"', "&quot;"))
             data = html.encode("utf-8")
@@ -749,6 +1053,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(200, {
                 "seeds": list_seeds(force=("refresh" in qs)),
                 "mutators": mutator_catalog(),
+            })
+        if path == "/api/corpus":
+            return self._send_json(200, {
+                "corpus": _load_corpus_layers(force=("refresh" in qs)),
+            })
+        if path == "/api/findings":
+            global _FINDINGS_CACHE
+            _FINDINGS_CACHE = None
+            return self._send_json(200, {
+                "findings": _load_findings(force=("refresh" in qs)),
             })
         self.send_error(404)
 
@@ -785,6 +1099,25 @@ class Handler(BaseHTTPRequestHandler):
                     cmd += ["--intensity", payload["intensity"]]
                 if payload.get("no_before"):
                     cmd.append("--no-before")
+            elif tool == "corpus_show":
+                seed_id = payload.get("seed_id")
+                if not seed_id:
+                    raise ValueError("seed_id required")
+                cmd = [PYTHON, str(TOOLS_DIR / "visualize_corpus.py"),
+                       "--show", seed_id]
+                if payload.get("rollout"):
+                    cmd.append("--rollout")
+                elif payload.get("viewer"):
+                    cmd.append("--viewer")
+            elif tool == "run_tool":
+                script = payload.get("script")
+                if not script:
+                    raise ValueError("script required")
+                # Security: only allow scripts that live in tools/ directory.
+                target = (TOOLS_DIR / script).resolve()
+                if not str(target).startswith(str(TOOLS_DIR.resolve())):
+                    raise ValueError(f"script must be inside tools/: {script!r}")
+                cmd = [PYTHON, str(target)] + list(payload.get("args", []))
             else:
                 raise ValueError(f"unknown tool: {tool!r}")
             pid = spawn(cmd)

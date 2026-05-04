@@ -1,0 +1,12 @@
+<mujoco model="scene_gripper_object_lift_267459">
+  <compiler angle="radian" autolimits="true"/>
+  <include file="../../curated/robosuite__robosuite_models_assets_robots_ur5e_robot/model.xml"/>
+  <worldbody>
+    <geom name="arena_floor" type="plane" size="1.0 1.0 0.05" contype="1" conaffinity="1"/>
+    <body name="prop_object" pos="0.0 0.0 0.04">
+      <freejoint/>
+      <geom name="propgeom_object" type="box" size="0.02 0.02 0.02" rgba="0.1 0.7 0.3 1" contype="1" conaffinity="1"/>
+      <inertial pos="0 0 0" mass="0.02" diaginertia="3.2000000000000003e-06 3.2000000000000003e-06 3.2000000000000003e-06"/>
+    </body>
+  </worldbody>
+</mujoco>

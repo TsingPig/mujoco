@@ -1,0 +1,6 @@
+{
+  "template": "actor_reset_context",
+  "actor_seed_id": "gym_robotics__gymnasium_robotics_envs_mujoco_assets_inverted_double_pendulum",
+  "actor_xml_path": "F:\\--CodeRepo\\--CodeRepo\\Research\\___Mujoco\\mujoco\\mujoco\\icse27\\mujoco_rl_fuzz_2.0\\seeds\\curated\\gym_robotics__gymnasium_robotics_envs_mujoco_assets_inverted_double_pendulum\\model.xml",
+  "seed": 888598
+}

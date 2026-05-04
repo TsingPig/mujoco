@@ -1,0 +1,27 @@
+<mujoco model="scene_actor_contact_stress_683244">
+  <compiler angle="radian" autolimits="true"/>
+  <include file="../../curated/menagerie__shadow_dexee_shadow_dexee/model.xml"/>
+  <worldbody>
+    <geom name="arena_floor" type="plane" size="2.0 2.0 0.1" contype="1" conaffinity="1"/>
+    <body name="prop_p1" pos="0.3 0.0 0.05">
+      <freejoint/>
+      <geom name="propgeom_p1" type="box" size="0.05 0.05 0.05" contype="1" conaffinity="1"/>
+      <inertial pos="0 0 0" mass="0.5" diaginertia="0.0005000000000000001 0.0005000000000000001 0.0005000000000000001"/>
+    </body>
+    <body name="prop_p2" pos="-0.3 0.0 0.05">
+      <freejoint/>
+      <geom name="propgeom_p2" type="box" size="0.05 0.05 0.05" contype="1" conaffinity="1"/>
+      <inertial pos="0 0 0" mass="0.5" diaginertia="0.0005000000000000001 0.0005000000000000001 0.0005000000000000001"/>
+    </body>
+    <body name="prop_p3" pos="0.0 0.3 0.05">
+      <freejoint/>
+      <geom name="propgeom_p3" type="box" size="0.05 0.05 0.05" contype="1" conaffinity="1"/>
+      <inertial pos="0 0 0" mass="0.5" diaginertia="0.0005000000000000001 0.0005000000000000001 0.0005000000000000001"/>
+    </body>
+    <body name="prop_p4" pos="0.0 -0.3 0.05">
+      <freejoint/>
+      <geom name="propgeom_p4" type="box" size="0.05 0.05 0.05" contype="1" conaffinity="1"/>
+      <inertial pos="0 0 0" mass="0.5" diaginertia="0.0005000000000000001 0.0005000000000000001 0.0005000000000000001"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,13 +1,93 @@
-# mujoco_rl_fuzz_2.0
+# MuFuzz (mujoco_rl_fuzz_2.0)
 
-GzFuzz 风格、面向 MuJoCo 物理引擎的 RL fuzzer —— v2.0 重设计。
+**MuFuzz** 是一个面向 MuJoCo 物理引擎的、**RL-guided** 的 fuzzing 框架。
+RL 不负责判断 bug，**bug 判断由 static / dynamic / differential oracles 完成**；
+RL 学习的是 *exploration policy*（"下一步用哪个 seed × scene × 轨迹原语，
+触达哪条 oracle"）。
 
 本目录与 `../mujoco_rl_fuzz/`（v1）**完全隔离**，除 `src/triage/signature.py`
 是 v1 triage 哈希的硬拷贝外，没有任何从 v1 的导入。
 
 ---
 
-## 一、当前已完成（v2.0-α）
+## 版本路线
+
+- **v2.0-α** ✅ — 单层 actor 种子 + 23 个 mutator + 双层验证门。
+- **v2.0-β** ✅ — Layered Seed Corpus (L0–L3)、Scene Composer、Env Adapters、
+  Trajectory Protocol、Episodic Runner、6 个 oracles、random / rule baseline。
+- **v2.0-γ** ⏳ — PPO actor-critic exploration policy（基于 β 同一 runner+oracle 接口）、
+  finding shrinker、MJX backend differential oracle、experiment harness。
+
+> Per project policy: PPO 不在 β 中实现。β 提供完整 substrate，γ 仅替换 selector。
+
+---
+
+## 一、v2.0-β 快速上手
+
+```powershell
+# 1. （已有）拉 L0 actor 种子
+python tools/fetch_actor_seeds.py            # 等价 tools/fetch_seeds.py
+
+# 2. L1 合成场景（actor + arena/props 包装）
+python tools/build_synthetic_scenes.py --count 50
+
+# 3. L2 开源环境（缺依赖会优雅降级为 metadata_only）
+python tools/fetch_env_scenes.py --no-smoke
+# 装好 robosuite / dm_control / ... 后再去掉 --no-smoke
+
+# 4. L3 轨迹种子（基于 L0/L1/L2 生成可重放协议）
+python tools/build_trajectory_seeds.py
+
+# 5. 校验四层语料分布
+python tools/validate_layered_corpus.py
+
+# 6. 列表 / 详情可视化
+python tools/visualize_corpus.py --list --layer synthetic_scene
+python tools/visualize_corpus.py --show <seed_id> --rollout
+
+# 7. 跑 baseline
+python tools/run_random_fuzz.py --budget 50
+python tools/run_rule_fuzz.py   --budget 50
+# 输出 findings/random/*.json, findings/rule/*.json
+```
+
+**严禁声明任何"已发现真实 bug"**。所有 finding 仅是 oracle severity 信号，
+需 γ 阶段的 reproducer + shrinker 才能上报。
+
+---
+
+## 二、v2.0-β 模块结构
+
+```
+src/
+  corpus/        layered seed schema + manifest + provenance
+  scene/         L1 SyntheticSceneSeed composer (10 templates)
+  env_adapters/  L2 OpenEnvSeed adapters (robosuite / gym_robotics /
+                 dm_control / mujoco_playground / myosuite)
+  trajectory/    L3 TrajectoryProtocol + recorder + replay
+  runner/        episodic dispatcher (RunRequest / RunResult)
+  oracles/       finite_state / instability / contact_force /
+                 reset_repro / sensor_reward / backend_diff
+  triage/        signature.py (v1 hard-copy) + finding.py
+  viz/           tabular corpus viewer
+tools/
+  build_synthetic_scenes.py    fetch_env_scenes.py
+  build_trajectory_seeds.py    visualize_corpus.py
+  validate_layered_corpus.py   run_random_fuzz.py / run_rule_fuzz.py
+seeds/
+  curated/             L0 actor seeds (α 阶段产物)
+  synthetic_scenes/    L1 manifest + per-seed scene.xml
+  open_envs/           L2 manifest (jsonl, no payload)
+  trajectory_seeds/    L3 manifest
+  _quarantine/         compile-failed payloads
+```
+
+每个层都有统一的 `LayeredSeed` schema 与 JSONL `manifest.jsonl`，
+runner 只看 isinstance dispatch。
+
+---
+
+## 三、v2.0-α 已完成（保留）
 
 α 阶段只实现“**能产生合法可编译模型 + 能落地的种子库**”，RL 部分推到 β。
 
@@ -121,38 +201,29 @@ python tools/visualize_mutator.py MUTATE_JOINT_TYPE
 
 ---
 
-## 四、TODO（v2.0-β / 后续 prompt 模板）
+## 四、TODO — v2.0-γ（PPO + 真正的 finding pipeline）
 
 需要继续推进时，把对应 prompt 直接抛给我即可。
 
-### Prompt P1 — 拉齐其余 6 个种子源
-> “网络已经可用，请运行 `python tools/fetch_seeds.py`（不带 `--only`），
-> 拉齐 menagerie / dm_control / gym_robotics / mujoco_mpc / robosuite / mjx
-> 共 7 个源；之后跑 `validate_seeds.py` + `validate_mutators.py --reps 1`，
-> 把新出现的 post_compile_fail 按 v2.0-α 一样的方式逐个收敛到 0，
-> 并把通过的种子总数追加到 README §一·1 末尾。”
+### Prompt G1 — Episode RL Loop & Reward
+> 在 `src/rl/` 实现 actor-critic：state = (current_layer, last_K_actions,
+> trace summary stats)，action = (s_actor, s_scene, s_traj, o_atom, q, i, r, b)
+> 八元组采样器；reward = oracle severity delta + 新 signature 增益 −
+> ε·compile_fail。先封装 selector 接口，PPO 留给 G2。
 
-### Prompt P2 — Episodic Runner & Oracle
-> “实现 `src/runner/episode.py`：给定 (model_xml, runtime_directives, n_steps)，
-> 调用 `mj_step` 循环；oracle 检测 NaN/Inf qacc、mjWARN_BADCTRL、
-> contact 数突变、能量爆增；命中后 dump 到 `findings/<sig>/`。
-> Sig 复用 `src/triage/signature.py`。”
+### Prompt G2 — PPO Implementation
+> 用 cleanrl 风格的 single-file PPO 实现 selector backbone，与
+> `src/runner.run_seed` 同一接口。
 
-### Prompt P3 — Actor-Critic + Sequential Mutator Selector
-> “按 GzFuzz ISSTA'25 的思路实现 `src/rl/`：state = (current_model_features,
-> last_K_mutators)，action = mutator_id ∪ intensity_mode，
-> reward = +1 新签名 / -ε 编译失败 / +λ·branch_cov_delta（覆盖率挂 v1 已有的
-> mjMARKLINE 桩）。先用 PPO，policy/value 共享 MLP backbone。”
+### Prompt G3 — Reproducer + Shrinker
+> `tools/repro.py findings/<id>` 用 mjpython 单独跑 dump 出来的 protocol；
+> `tools/shrink.py` 用 delta-debugging 缩减 horizon / action_seq /
+> mutator history。
 
-### Prompt P4 — 增量种子 / Pool / Replay
-> “实现 `src/seedpool/`：episode 找到的 mutated XML 若新增 issue 签名，
-> 按概率回灌到 curated pool；保留滚动 LRU。”
+### Prompt G4 — MJX Backend Differential
+> 接 mjx，扩展 `BackendDiffOracle.evaluate`：用同一 protocol 在 classic 和 mjx
+> 上各跑一次，比较 qpos/qvel residual。
 
-### Prompt P5 — 复现脚本与最小化
-> “实现 `tools/repro.py findings/<sig>`：用 mjpython 单独跑 dump 出来的
-> XML+directive，确认稳定复现；再实现 `tools/shrink.py` 用 delta-debugging
-> 缩减 XML 与 directive。”
-
-### Prompt P6 — 实验记录
-> “给 ICSE'27 起一个 `experiments/` 目录，配 hydra/yaml 的 sweep 脚本，
-> 每次跑落盘 (config_hash, seed, found_sigs, wallclock)。”
+### Prompt G5 — Experiment Harness
+> `experiments/` + hydra/yaml sweep；记录 (config_hash, seed, signatures,
+> wallclock, oracle_severity_sum)。

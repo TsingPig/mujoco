@@ -1,0 +1,6 @@
+{
+  "template": "gripper_object_lift",
+  "actor_seed_id": "robosuite__robosuite_models_assets_robots_ur5e_robot",
+  "actor_xml_path": "F:\\--CodeRepo\\--CodeRepo\\Research\\___Mujoco\\mujoco\\mujoco\\icse27\\mujoco_rl_fuzz_2.0\\seeds\\curated\\robosuite__robosuite_models_assets_robots_ur5e_robot\\model.xml",
+  "seed": 267459
+}

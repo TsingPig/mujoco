@@ -1,0 +1,13 @@
+{
+  "source": "generated",
+  "repo": null,
+  "commit": null,
+  "package": null,
+  "package_version": null,
+  "src_rel_path": null,
+  "local_path": "seeds\\synthetic_scenes\\scene_0003_actor_contact_stress_menagerie__shadow_dexee_shadow_d",
+  "license_path": null,
+  "collected_at": "2026-05-03T11:06:42.780765Z",
+  "notes": "composed from actor menagerie__shadow_dexee_shadow_dexee via template actor_contact_stress",
+  "extra": {}
+}

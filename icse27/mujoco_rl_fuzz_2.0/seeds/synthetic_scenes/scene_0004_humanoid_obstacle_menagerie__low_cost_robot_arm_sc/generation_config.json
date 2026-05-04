@@ -1,0 +1,6 @@
+{
+  "template": "humanoid_obstacle",
+  "actor_seed_id": "menagerie__low_cost_robot_arm_scene",
+  "actor_xml_path": "F:\\--CodeRepo\\--CodeRepo\\Research\\___Mujoco\\mujoco\\mujoco\\icse27\\mujoco_rl_fuzz_2.0\\seeds\\curated\\menagerie__low_cost_robot_arm_scene\\model.xml",
+  "seed": 98418
+}

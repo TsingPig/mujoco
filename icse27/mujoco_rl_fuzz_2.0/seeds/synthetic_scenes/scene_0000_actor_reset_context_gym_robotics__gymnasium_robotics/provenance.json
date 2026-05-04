@@ -1,0 +1,13 @@
+{
+  "source": "generated",
+  "repo": null,
+  "commit": null,
+  "package": null,
+  "package_version": null,
+  "src_rel_path": null,
+  "local_path": "seeds\\synthetic_scenes\\scene_0000_actor_reset_context_gym_robotics__gymnasium_robotics",
+  "license_path": null,
+  "collected_at": "2026-05-03T11:06:42.192341Z",
+  "notes": "composed from actor gym_robotics__gymnasium_robotics_envs_mujoco_assets_inverted_double_pendulum via template actor_reset_context",
+  "extra": {}
+}
